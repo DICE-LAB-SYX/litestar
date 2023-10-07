@@ -115,6 +115,7 @@ nitpick_ignore = [
     (PY_CLASS, "NoneType"),
     (PY_CLASS, "litestar._openapi.schema_generation.schema.SchemaCreator"),
     (PY_CLASS, "litestar._signature.model.SignatureModel"),
+    (PY_CLASS, "litestar.contrib.sqlalchemy.plugins.init.config.compat._CreateEngineMixin"),
     (PY_CLASS, "litestar.utils.signature.ParsedSignature"),
     (PY_CLASS, "litestar.utils.sync.AsyncCallable"),
     # types in changelog that no longer exist
@@ -140,8 +141,9 @@ nitpick_ignore = [
     (PY_METH, "litestar.dto.factory.DTOData.create_instance"),
     (PY_METH, "litestar.dto.interface.DTOInterface.data_to_encodable_type"),
     (PY_CLASS, "advanced_alchemy.repository.typing.ModelT"),
-    (PY_CLASS, "advanced_alchemy.config.common.EngineT"),
-    (PY_CLASS, "advanced_alchemy.config.common.SessionT"),
+    (PY_OBJ, "advanced_alchemy.config.common.SessionMakerT"),
+    (PY_OBJ, "advanced_alchemy.config.common.ConnectionT"),
+    (PY_CLASS, "advanced_alchemy.extensions.litestar.plugins._slots_base.SlotsBase"),
     (PY_CLASS, "advanced_alchemy.config.EngineConfig"),
     (PY_CLASS, "advanced_alchemy.extensions.litestar.plugins.SQLAlchemyPlugin"),
     (PY_CLASS, "advanced_alchemy.extensions.litestar.plugins.SQLAlchemySerializationPlugin"),
@@ -155,6 +157,8 @@ nitpick_ignore = [
     (PY_CLASS, "advanced_alchemy.types.BigIntIdentity"),
     (PY_FUNC, "sqlalchemy.get_engine"),
     (PY_ATTR, "advanced_alchemy.repository.AbstractAsyncRepository.id_attribute"),
+    (PY_OBJ, "litestar.template.base.T_co"),
+    ("py:exc", "RepositoryError"),
 ]
 
 nitpick_ignore_regex = [
@@ -179,6 +183,9 @@ nitpick_ignore_regex = [
     (PY_RE, r"litestar\.connection\.base\.UserT"),
     (PY_RE, r"litestar\.pagination\.C"),
     (PY_RE, r"multidict\..*"),
+    (PY_RE, r"advanced_alchemy.*\.T"),
+    (PY_RE, r"advanced_alchemy\.config.common\.EngineT"),
+    (PY_RE, r"advanced_alchemy\.config.common\.SessionT"),
 ]
 
 # Warnings about missing references to those targets in the specified location will be ignored.
