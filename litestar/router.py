@@ -13,7 +13,8 @@ from litestar.handlers.websocket_handlers import WebsocketListener, WebsocketRou
 from litestar.routes import ASGIRoute, HTTPRoute, WebSocketRoute
 from litestar.types.empty import Empty
 from litestar.utils import find_index, is_class_and_subclass, join_paths, normalize_path, unique
-from litestar.utils.sync import AsyncCallable
+from litestar.utils.signature import add_types_to_signature_namespace
+from litestar.utils.sync import ensure_async_callable
 
 __all__ = ("Router",)
 
@@ -101,6 +102,7 @@ class Router:
         route_handlers: Sequence[ControllerRouterHandler],
         security: Sequence[SecurityRequirement] | None = None,
         signature_namespace: Mapping[str, Any] | None = None,
+        signature_types: Sequence[Any] | None = None,
         tags: Sequence[str] | None = None,
         type_encoders: TypeEncodersMap | None = None,
         type_decoders: TypeDecodersSequence | None = None,
@@ -147,16 +149,18 @@ class Router:
             security: A sequence of dicts that will be added to the schema of all route handlers in the application.
                 See :data:`SecurityRequirement <.openapi.spec.SecurityRequirement>`
                 for details.
-            signature_namespace: A mapping of names to types for use in forward reference resolution during signature modelling.
+            signature_namespace: A mapping of names to types for use in forward reference resolution during signature modeling.
+            signature_types: A sequence of types for use in forward reference resolution during signature modeling.
+                These types will be added to the signature namespace using their ``__name__`` attribute.
             tags: A sequence of string tags that will be appended to the schema of all route handlers under the
                 application.
             type_encoders: A mapping of types to callables that transform them into types supported for serialization.
             type_decoders: A sequence of tuples, each composed of a predicate testing for type identity and a msgspec hook for deserialization.
         """
 
-        self.after_request = AsyncCallable(after_request) if after_request else None  # type: ignore[arg-type]
-        self.after_response = AsyncCallable(after_response) if after_response else None
-        self.before_request = AsyncCallable(before_request) if before_request else None
+        self.after_request = ensure_async_callable(after_request) if after_request else None  # pyright: ignore
+        self.after_response = ensure_async_callable(after_response) if after_response else None
+        self.before_request = ensure_async_callable(before_request) if before_request else None
         self.cache_control = cache_control
         self.dto = dto
         self.etag = etag
@@ -175,7 +179,9 @@ class Router:
         self.return_dto = return_dto
         self.routes: list[HTTPRoute | ASGIRoute | WebSocketRoute] = []
         self.security = list(security or [])
-        self.signature_namespace = signature_namespace or {}
+        self.signature_namespace = add_types_to_signature_namespace(
+            signature_types or [], dict(signature_namespace or {})
+        )
         self.tags = list(tags or [])
         self.registered_route_handler_ids: set[int] = set()
         self.type_encoders = dict(type_encoders) if type_encoders is not None else None

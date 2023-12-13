@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from importlib.util import find_spec
@@ -42,6 +43,10 @@ default_handlers: dict[str, dict[str, Any]] = {
         "formatter": "standard",
     },
 }
+
+if sys.version_info >= (3, 12, 0):
+    default_handlers["queue_listener"]["handlers"] = ["console"]
+
 
 default_picologging_handlers: dict[str, dict[str, Any]] = {
     "console": {
@@ -109,7 +114,7 @@ def _default_exception_logging_handler_factory(
     return _default_exception_logging_handler
 
 
-class BaseLoggingConfig(ABC):  # pragma: no cover
+class BaseLoggingConfig(ABC):
     """Abstract class that should be extended by logging configs."""
 
     __slots__ = ("log_exceptions", "traceback_line_limit", "exception_logging_handler")
@@ -250,7 +255,7 @@ def default_structlog_processors() -> list[Processor] | None:  # pyright: ignore
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.JSONRenderer(serializer=default_json_serializer),
         ]
-    except ImportError:  # pragma: no cover
+    except ImportError:
         return None
 
 
@@ -265,7 +270,7 @@ def default_wrapper_class() -> type[BindableLogger] | None:  # pyright: ignore
         import structlog
 
         return structlog.make_filtering_bound_logger(INFO)
-    except ImportError:  # pragma: no cover
+    except ImportError:
         return None
 
 
@@ -279,7 +284,7 @@ def default_logger_factory() -> Callable[..., WrappedLogger] | None:
         import structlog
 
         return structlog.BytesLoggerFactory()
-    except ImportError:  # pragma: no cover
+    except ImportError:
         return None
 
 
@@ -327,7 +332,6 @@ class StructLoggingConfig(BaseLoggingConfig):
 
         from structlog import configure, get_logger
 
-        # we now configure structlog
         configure(
             **{
                 k: v

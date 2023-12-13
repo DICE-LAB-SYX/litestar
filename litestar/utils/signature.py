@@ -6,37 +6,132 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from inspect import Signature, getmembers, isclass, ismethod
 from itertools import chain
-from typing import Any
+from typing import TYPE_CHECKING, Any, Union
 
-from typing_extensions import Self, get_type_hints
+from typing_extensions import Annotated, Self, get_args, get_origin, get_type_hints
 
 from litestar import connection, datastructures, types
-from litestar.enums import RequestEncodingType
-from litestar.params import BodyKwarg
+from litestar.exceptions import ImproperlyConfiguredException
 from litestar.types import Empty
 from litestar.typing import FieldDefinition
+from litestar.utils.typing import unwrap_annotation
 
-if typing.TYPE_CHECKING:
+if TYPE_CHECKING:
+    from typing import Sequence
+
     from litestar.types import AnyCallable
+
+if sys.version_info < (3, 11):
+    from typing import _get_defaults  # type: ignore[attr-defined]
+else:
+
+    def _get_defaults(_: Any) -> Any:
+        ...
+
+
+__all__ = (
+    "add_types_to_signature_namespace",
+    "get_fn_type_hints",
+    "ParsedSignature",
+)
 
 _GLOBAL_NAMES = {
     namespace: export
     for namespace, export in chain(
         tuple(getmembers(types)), tuple(getmembers(connection)), tuple(getmembers(datastructures))
     )
-    if namespace[0].isupper()
-    and namespace in chain(types.__all__, connection.__all__, datastructures.__all__)  # pyright: ignore
+    if namespace[0].isupper() and namespace in chain(types.__all__, connection.__all__, datastructures.__all__)  # pyright: ignore
 }
 """A mapping of names used for handler signature forward-ref resolution.
 
 This allows users to include these names within an `if TYPE_CHECKING:` block in their handler module.
 """
 
-__all__ = (
-    "get_fn_type_hints",
-    "ParsedSignature",
-    "infer_request_encoding_from_field_definition",
-)
+
+def _unwrap_implicit_optional_hints(defaults: dict[str, Any], hints: dict[str, Any]) -> dict[str, Any]:
+    """Unwrap implicit optional hints.
+
+    On Python<3.11, if a function parameter annotation has a ``None`` default, it is unconditionally wrapped in an
+    ``Optional`` type.
+
+    If the annotation is not annotated, then any nested unions are flattened, e.g.,:
+
+    .. code-block:: python
+
+        def foo(a: Optional[Union[str, int]] = None):
+            ...
+
+    ...will become `Union[str, int, NoneType]`.
+
+    However, if the annotation is annotated, then we end up with an optional union around the annotated type, e.g.,:
+
+    .. code-block:: python
+
+        def foo(a: Annotated[Optional[Union[str, int]], ...] = None):
+            ...
+
+    ... becomes `Union[Annotated[Union[str, int, NoneType], ...], NoneType]`
+
+    This function makes the latter case consistent with the former by either removing the outer union if it is redundant
+    or flattening the union if it is not. The latter case would become `Annotated[Union[str, int, NoneType], ...]`.
+
+    Args:
+        defaults: Mapping of names to default values.
+        hints: Mapping of names to types.
+
+    Returns:
+        Mapping of names to types.
+    """
+
+    def _is_two_arg_optional(origin_: Any, args_: Any) -> bool:
+        """Check if a type is a two-argument optional type.
+
+        If the type has been wrapped in `Optional` by `get_type_hints()` it will always be a union of a type and
+        `NoneType`.
+
+        See: https://github.com/litestar-org/litestar/pull/2516
+        """
+        return origin_ is Union and len(args_) == 2 and args_[1] is type(None)
+
+    def _is_any_optional(origin_: Any, args_: tuple[Any, ...]) -> bool:
+        """Detect if a type is a union with `NoneType`.
+
+        After detecting that a type is a two-argument optional type, this function can be used to detect if the
+        inner type is a union with `NoneType` at all.
+
+        We only want to perform the unwrapping of the optional union if the inner type is optional as well.
+        """
+        return origin_ is Union and any(arg is type(None) for arg in args_)
+
+    for name, default in defaults.items():
+        if default is not None:
+            continue
+
+        hint = hints[name]
+        origin = get_origin(hint)
+        args = get_args(hint)
+
+        if _is_two_arg_optional(origin, args):
+            unwrapped_inner, meta, wrappers = unwrap_annotation(args[0])
+
+            if Annotated not in wrappers:
+                continue
+
+            inner_args = get_args(unwrapped_inner)
+
+            if not _is_any_optional(get_origin(unwrapped_inner), inner_args):
+                # this is where hint is like `Union[Annotated[Union[str, int], ...], NoneType]`, we add the outer union
+                # into the inner one, and re-wrap with Annotated
+                union_args = (*(inner_args or (unwrapped_inner,)), type(None))
+                # calling `__class_getitem__` directly as in earlier py vers it is a syntax error to unpack into
+                # the getitem brackets, e.g., Annotated[T, *meta].
+                hints[name] = Annotated.__class_getitem__((Union[union_args], *meta))  # type: ignore[attr-defined]
+                continue
+
+            # this is where hint is like `Union[Annotated[Union[str, NoneType], ...], NoneType]`, we remove the
+            # redundant outer union
+            hints[name] = args[0]
+    return hints
 
 
 def get_fn_type_hints(fn: Any, namespace: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -72,7 +167,14 @@ def get_fn_type_hints(fn: Any, namespace: dict[str, Any] | None = None) -> dict[
         **vars(sys.modules[module_name]),
         **(namespace or {}),
     }
-    return get_type_hints(fn_to_inspect, globalns=namespace, include_extras=True)
+    hints = get_type_hints(fn_to_inspect, globalns=namespace, include_extras=True)
+
+    if sys.version_info < (3, 11):
+        # see https://github.com/litestar-org/litestar/pull/2516
+        defaults = _get_defaults(fn_to_inspect)
+        hints = _unwrap_implicit_optional_hints(defaults, hints)
+
+    return hints
 
 
 @dataclass(frozen=True)
@@ -143,17 +245,26 @@ class ParsedSignature:
         )
 
 
-def infer_request_encoding_from_field_definition(field_definition: FieldDefinition) -> RequestEncodingType | str:
-    """Infer the request encoding type from a parsed type.
+def add_types_to_signature_namespace(
+    signature_types: Sequence[Any], signature_namespace: dict[str, Any]
+) -> dict[str, Any]:
+    """Add types to ith signature namespace mapping.
+
+    Types are added mapped to their `__name__` attribute.
 
     Args:
-        field_definition: The parsed parameter to infer the request encoding type from.
+        signature_types: A list of types to add to the signature namespace.
+        signature_namespace: The signature namespace to add types to.
+
+    Raises:
+        ImproperlyConfiguredException: If a type is already defined in the signature namespace.
+        AttributeError: If a type does not have a `__name__` attribute.
 
     Returns:
-        The inferred request encoding type.
+        The updated signature namespace.
     """
-    if field_definition.kwarg_definition and isinstance(field_definition.kwarg_definition, BodyKwarg):
-        return field_definition.kwarg_definition.media_type
-    if isinstance(field_definition.default, BodyKwarg):
-        return field_definition.default.media_type
-    return RequestEncodingType.JSON
+    for typ in signature_types:
+        if (name := typ.__name__) in signature_namespace:
+            raise ImproperlyConfiguredException(f"Type '{name}' is already defined in the signature namespace")
+        signature_namespace[name] = typ
+    return signature_namespace

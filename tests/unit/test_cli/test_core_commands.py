@@ -14,6 +14,7 @@ from litestar.cli.main import litestar_group as cli_command
 from litestar.exceptions import LitestarWarning
 
 from . import (
+    APP_FACTORY_FILE_CONTENT_SERVER_LIFESPAN_PLUGIN,
     CREATE_APP_FILE_CONTENT,
     GENERIC_APP_FACTORY_FILE_CONTENT,
     GENERIC_APP_FACTORY_FILE_CONTENT_STRING_ANNOTATION,
@@ -116,11 +117,11 @@ def test_run_command(
 
     if web_concurrency is None:
         web_concurrency = 1
-
     elif set_in_env:
         monkeypatch.setenv("WEB_CONCURRENCY", str(web_concurrency))
     else:
         args.extend(["--web-concurrency", str(web_concurrency)])
+
     if reload_dir is not None:
         if set_in_env:
             monkeypatch.setenv("LITESTAR_RELOAD_DIRS", ",".join(reload_dir))
@@ -158,7 +159,14 @@ def test_run_command(
     else:
         mock_subprocess_run.assert_not_called()
         mock_uvicorn_run.assert_called_once_with(
-            app=f"{path.stem}:app", host=host, port=port, uds=uds, fd=fd, factory=False
+            app=f"{path.stem}:app",
+            host=host,
+            port=port,
+            uds=uds,
+            fd=fd,
+            factory=False,
+            ssl_certfile=None,
+            ssl_keyfile=None,
         )
 
     mock_show_app_info.assert_called_once()
@@ -190,7 +198,14 @@ def test_run_command_with_autodiscover_app_factory(
     assert result.exit_code == 0
 
     mock_uvicorn_run.assert_called_once_with(
-        app=f"{path.stem}:{factory_name}", host="127.0.0.1", port=8000, factory=True, uds=None, fd=None
+        app=f"{path.stem}:{factory_name}",
+        host="127.0.0.1",
+        port=8000,
+        factory=True,
+        uds=None,
+        fd=None,
+        ssl_certfile=None,
+        ssl_keyfile=None,
     )
 
 
@@ -205,7 +220,14 @@ def test_run_command_with_app_factory(
     assert result.exit_code == 0
 
     mock_uvicorn_run.assert_called_once_with(
-        app=str(app_path), host="127.0.0.1", port=8000, factory=True, uds=None, fd=None
+        app=str(app_path),
+        host="127.0.0.1",
+        port=8000,
+        factory=True,
+        uds=None,
+        fd=None,
+        ssl_certfile=None,
+        ssl_keyfile=None,
     )
 
 
@@ -273,3 +295,29 @@ def test_version_command(short: bool, runner: CliRunner) -> None:
     result = runner.invoke(cli_command, "version --short" if short else "version")
 
     assert result.output.strip() == litestar_version.formatted(short=short)
+
+
+@pytest.mark.usefixtures("mock_uvicorn_run", "unset_env")
+def test_run_command_with_server_lifespan_plugin(
+    runner: CliRunner, mock_uvicorn_run: MagicMock, create_app_file: CreateAppFileFixture
+) -> None:
+    path = create_app_file("_create_app_with_path.py", content=APP_FACTORY_FILE_CONTENT_SERVER_LIFESPAN_PLUGIN)
+    app_path = f"{path.stem}:create_app"
+    result = runner.invoke(cli_command, ["--app", app_path, "run"])
+
+    assert result.exception is None
+    assert result.exit_code == 0
+    assert "i_run_before_startup_plugin" in result.stdout
+    assert "i_run_after_shutdown_plugin" in result.stdout
+    assert result.stdout.find("i_run_before_startup_plugin") < result.stdout.find("i_run_after_shutdown_plugin")
+
+    mock_uvicorn_run.assert_called_once_with(
+        app=str(app_path),
+        host="127.0.0.1",
+        port=8000,
+        fd=None,
+        uds=None,
+        factory=True,
+        ssl_certfile=None,
+        ssl_keyfile=None,
+    )

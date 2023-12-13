@@ -100,6 +100,7 @@ def create_test_client(
     security: Sequence[SecurityRequirement] | None = None,
     session_config: BaseBackendConfig | None = None,
     signature_namespace: Mapping[str, Any] | None = None,
+    signature_types: Sequence[Any] | None = None,
     state: State | None = None,
     static_files_config: Sequence[StaticFilesConfig] | None = None,
     stores: StoreRegistry | dict[str, Store] | None = None,
@@ -119,14 +120,16 @@ def create_test_client(
             handled correctly.
 
     Examples:
-        .. code-block: python
+        .. code-block:: python
 
             from litestar import get
             from litestar.testing import create_test_client
 
+
             @get("/some-path")
             def my_handler() -> dict[str, str]:
                 return {"hello": "world"}
+
 
             def test_my_handler() -> None:
                 with create_test_client(my_handler) as client:
@@ -214,7 +217,9 @@ def create_test_client(
         security: A sequence of dicts that will be added to the schema of all route handlers in the application.
             See
             :data:`SecurityRequirement <.openapi.spec.SecurityRequirement>` for details.
-        signature_namespace: A mapping of names to types for use in forward reference resolution during signature modelling.
+        signature_namespace: A mapping of names to types for use in forward reference resolution during signature modeling.
+        signature_types: A sequence of types for use in forward reference resolution during signature modeling.
+            These types will be added to the signature namespace using their ``__name__`` attribute.
         state: An optional :class:`State <.datastructures.State>` for application state.
         static_files_config: A sequence of :class:`StaticFilesConfig <.static_files.StaticFilesConfig>`
         stores: Central registry of :class:`Store <.stores.base.Store>` that will be available throughout the
@@ -279,6 +284,7 @@ def create_test_client(
         route_handlers=route_handlers,
         security=security,
         signature_namespace=signature_namespace,
+        signature_types=signature_types,
         state=state,
         static_files_config=static_files_config,
         stores=stores,
@@ -349,6 +355,7 @@ def create_async_test_client(
     security: Sequence[SecurityRequirement] | None = None,
     session_config: BaseBackendConfig | None = None,
     signature_namespace: Mapping[str, Any] | None = None,
+    signature_types: Sequence[Any] | None = None,
     state: State | None = None,
     static_files_config: Sequence[StaticFilesConfig] | None = None,
     stores: StoreRegistry | dict[str, Store] | None = None,
@@ -368,14 +375,16 @@ def create_async_test_client(
             handled correctly.
 
     Examples:
-        .. code-block: python
+        .. code-block:: python
 
             from litestar import get
             from litestar.testing import create_test_client
 
+
             @get("/some-path")
             def my_handler() -> dict[str, str]:
                 return {"hello": "world"}
+
 
             def test_my_handler() -> None:
                 with create_test_client(my_handler) as client:
@@ -463,7 +472,9 @@ def create_async_test_client(
         security: A sequence of dicts that will be added to the schema of all route handlers in the application.
             See
             :data:`SecurityRequirement <.openapi.spec.SecurityRequirement>` for details.
-        signature_namespace: A mapping of names to types for use in forward reference resolution during signature modelling.
+        signature_namespace: A mapping of names to types for use in forward reference resolution during signature modeling.
+        signature_types: A sequence of types for use in forward reference resolution during signature modeling.
+            These types will be added to the signature namespace using their ``__name__`` attribute.
         state: An optional :class:`State <.datastructures.State>` for application state.
         static_files_config: A sequence of :class:`StaticFilesConfig <.static_files.StaticFilesConfig>`
         stores: Central registry of :class:`Store <.stores.base.Store>` that will be available throughout the
@@ -527,6 +538,7 @@ def create_async_test_client(
         route_handlers=route_handlers,
         security=security,
         signature_namespace=signature_namespace,
+        signature_types=signature_types,
         state=state,
         static_files_config=static_files_config,
         stores=stores,

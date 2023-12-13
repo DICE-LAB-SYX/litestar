@@ -18,9 +18,7 @@ def test_schema_generation() -> None:
                             "200": {
                                 "description": "Request fulfilled, document follows",
                                 "headers": {},
-                                "content": {
-                                    "application/json": {"schema": {"$ref": "#/components/schemas/IdContainer"}}
-                                },
+                                "content": {"application/json": {"schema": {"$ref": "#/components/schemas/IdModel"}}},
                             }
                         },
                         "deprecated": False,
@@ -29,7 +27,7 @@ def test_schema_generation() -> None:
             },
             "components": {
                 "schemas": {
-                    "IdContainer": {
+                    "IdModel": {
                         "properties": {"id": {"type": "string", "format": "uuid", "description": "Any UUID string"}},
                         "type": "object",
                         "required": ["id"],

@@ -1,12 +1,15 @@
+from dataclasses import dataclass
 from types import ModuleType
 from typing import Any, Callable, Iterable, List, Optional, Sequence, Union
 from unittest.mock import MagicMock
 
+import msgspec
 import pytest
 from typing_extensions import Annotated
 
 from litestar import get
 from litestar._signature import SignatureModel
+from litestar.dto import DataclassDTO
 from litestar.params import Body, Parameter
 from litestar.status_codes import HTTP_200_OK, HTTP_204_NO_CONTENT
 from litestar.testing import TestClient, create_test_client
@@ -21,9 +24,9 @@ def test_create_function_signature_model_parameter_parsing() -> None:
 
     model = SignatureModel.create(
         dependency_name_set=set(),
-        fn=my_fn.fn.value,
+        fn=my_fn.fn,
         data_dto=None,
-        parsed_signature=ParsedSignature.from_fn(my_fn.fn.value, {}),
+        parsed_signature=ParsedSignature.from_fn(my_fn.fn, {}),
         type_decoders=[],
     )
     fields = model._fields
@@ -38,7 +41,7 @@ def test_create_function_signature_model_parameter_parsing() -> None:
     assert fields["d"].default == b"123"
     assert fields["e"].annotation == Optional[dict]
     assert fields["e"].is_optional
-    assert fields["e"].default is Empty
+    assert fields["e"].default is None
 
 
 def test_create_function_signature_model_ignore_return_annotation() -> None:
@@ -48,9 +51,9 @@ def test_create_function_signature_model_ignore_return_annotation() -> None:
 
     signature_model_type = SignatureModel.create(
         dependency_name_set=set(),
-        fn=health_check.fn.value,
+        fn=health_check.fn,
         data_dto=None,
-        parsed_signature=ParsedSignature.from_fn(health_check.fn.value, {}),
+        parsed_signature=ParsedSignature.from_fn(health_check.fn, {}),
         type_decoders=[],
     )
     assert signature_model_type().to_dict() == {}
@@ -61,11 +64,11 @@ def test_signature_model_resolves_forward_ref_annotations(create_module: Callabl
         """
 from __future__ import annotations
 
-from pydantic import BaseModel
+from msgspec import Struct
 from litestar import Litestar, get
 from litestar.di import Provide
 
-class Test(BaseModel):
+class Test(Struct):
     hello: str
 
 async def get_dep() -> Test:
@@ -154,3 +157,57 @@ def test_union_constraint_handling() -> None:
 
     assert response.status_code == 200
     mock.assert_called_once_with("foo")
+
+
+@pytest.mark.parametrize(("with_optional",), [(True,), (False,)])
+def test_collection_union_struct_fields(with_optional: bool) -> None:
+    """Test consistent behavior between optional and non-optional collection unions.
+
+    Issue: https://github.com/litestar-org/litestar/issues/2600 identified that where a union
+    of collection types was optional, it would result in a 400 error when the handler was called,
+    whereas a non-optional union would result in a 500 error.
+
+    This test ensures that both optional and non-optional unions of collection types result in
+    the same error.
+    """
+
+    annotation = Union[List[str], List[int]]
+
+    if with_optional:
+        annotation = Optional[annotation]  # type: ignore[misc]
+
+    @get("/", signature_namespace={"annotation": annotation})
+    def handler(param: annotation) -> None:  # pyright: ignore
+        return None
+
+    with create_test_client([handler]) as client:
+        response = client.get("/?param=foo&param=bar&param=123")
+        assert response.status_code == 500
+        assert "TypeError: Type unions may not contain more than one array-like" in response.text
+
+
+def test_dto_data_typed_as_any() -> None:
+    """DTOs already validate the payload, we don't need the signature model to do it too.
+
+    https://github.com/litestar-org/litestar/issues/2149
+    """
+
+    @dataclass
+    class Test:
+        a: str
+
+    dto = DataclassDTO[Test]
+
+    def fn(data: Test) -> None:
+        pass
+
+    model = SignatureModel.create(
+        dependency_name_set=set(),
+        fn=fn,
+        data_dto=dto,
+        parsed_signature=ParsedSignature.from_fn(fn, signature_namespace={"Test": Test}),
+        type_decoders=[],
+    )
+    (field,) = msgspec.structs.fields(model)
+    assert field.name == "data"
+    assert field.type is Any

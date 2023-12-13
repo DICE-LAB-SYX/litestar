@@ -25,14 +25,10 @@ import pytest
 from litestar import Litestar, Request, get, post
 from litestar.stores.base import Store
 from litestar.testing import TestClient
+from litestar.utils.helpers import get_exception_group
 from tests.helpers import maybe_async, maybe_async_cm
 
-try:
-    _ExceptionGroup = ExceptionGroup
-except NameError:
-    from exceptiongroup import ExceptionGroup
-
-    _ExceptionGroup = ExceptionGroup  # type: ignore
+_ExceptionGroup = get_exception_group()
 
 AnyTestClient = Union[TestClient, AsyncTestClient]
 
@@ -114,13 +110,13 @@ async def test_use_testclient_in_endpoint(
     async def homepage() -> Any:
         local_client = test_client_cls(mock_service, backend=test_client_backend)
         local_response = await maybe_async(local_client.get("/"))
-        return local_response.json()  # type: ignore[union-attr, misc]
+        return local_response.json()  # type: ignore[union-attr]
 
     app = Litestar(route_handlers=[homepage])
 
     client = test_client_cls(app)
     response = await maybe_async(client.get("/"))
-    assert response.json() == {"mock": "example"}  # type: ignore[union-attr, misc]
+    assert response.json() == {"mock": "example"}  # type: ignore[union-attr]
 
 
 def raise_error(app: Litestar) -> NoReturn:
@@ -176,7 +172,7 @@ async def test_client_interface(
         response = await maybe_async(client.head("/"))
     else:
         response = await maybe_async(client.options("/"))
-    assert response.status_code == HTTP_200_OK  # type: ignore[union-attr, misc]
+    assert response.status_code == HTTP_200_OK  # type: ignore[union-attr]
 
 
 def test_warns_problematic_domain(test_client_cls: Type[AnyTestClient]) -> None:
@@ -217,25 +213,25 @@ async def test_client_interface_context_manager(
     async with maybe_async_cm(test_client_cls(mock_service, backend=test_client_backend)) as client:  # pyright: ignore
         if method == "get":
             response = await maybe_async(client.get("/"))  # type: ignore[attr-defined]
-            assert response.status_code == HTTP_200_OK
+            assert response.status_code == HTTP_200_OK  # pyright: ignore
         elif method == "post":
             response = await maybe_async(client.post("/"))  # type: ignore[attr-defined]
-            assert response.status_code == HTTP_201_CREATED
+            assert response.status_code == HTTP_201_CREATED  # pyright: ignore
         elif method == "put":
             response = await maybe_async(client.put("/"))  # type: ignore[attr-defined]
-            assert response.status_code == HTTP_200_OK
+            assert response.status_code == HTTP_200_OK  # pyright: ignore
         elif method == "patch":
             response = await maybe_async(client.patch("/"))  # type: ignore[attr-defined]
-            assert response.status_code == HTTP_200_OK
+            assert response.status_code == HTTP_200_OK  # pyright: ignore
         elif method == "delete":
             response = await maybe_async(client.delete("/"))  # type: ignore[attr-defined]
-            assert response.status_code == HTTP_204_NO_CONTENT
+            assert response.status_code == HTTP_204_NO_CONTENT  # pyright: ignore
         elif method == "head":
             response = await maybe_async(client.head("/"))  # type: ignore[attr-defined]
-            assert response.status_code == HTTP_200_OK
+            assert response.status_code == HTTP_200_OK  # pyright: ignore
         else:
             response = await maybe_async(client.options("/"))  # type: ignore[attr-defined]
-            assert response.status_code == HTTP_204_NO_CONTENT
+            assert response.status_code == HTTP_204_NO_CONTENT  # pyright: ignore
 
 
 @pytest.mark.parametrize("block,timeout", [(False, None), (False, 0.001), (True, 0.001)])

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence, cast
 from litestar._signature import SignatureModel
 from litestar.config.app import ExperimentalFeatures
 from litestar.di import Provide
+from litestar.dto import DTOData
 from litestar.exceptions import ImproperlyConfiguredException
 from litestar.serialization import default_deserializer, default_serializer
 from litestar.types import (
@@ -14,15 +15,14 @@ from litestar.types import (
     Empty,
     ExceptionHandlersMap,
     Guard,
-    MaybePartial,
     Middleware,
     TypeDecodersSequence,
     TypeEncodersMap,
 )
 from litestar.typing import FieldDefinition
-from litestar.utils import AsyncCallable, Ref, get_name, normalize_path
+from litestar.utils import ensure_async_callable, get_name, normalize_path
 from litestar.utils.helpers import unwrap_partial
-from litestar.utils.signature import ParsedSignature
+from litestar.utils.signature import ParsedSignature, add_types_to_signature_namespace
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -88,6 +88,7 @@ class BaseRouteHandler:
         opt: Mapping[str, Any] | None = None,
         return_dto: type[AbstractDTO] | None | EmptyType = Empty,
         signature_namespace: Mapping[str, Any] | None = None,
+        signature_types: Sequence[Any] | None = None,
         type_encoders: TypeEncodersMap | None = None,
         type_decoders: TypeDecodersSequence | None = None,
         **kwargs: Any,
@@ -111,6 +112,8 @@ class BaseRouteHandler:
                 outbound response data.
             signature_namespace: A mapping of names to types for use in forward reference resolution during signature
                 modelling.
+            signature_types: A sequence of types for use in forward reference resolution during signature modeling.
+                These types will be added to the signature namespace using their ``__name__`` attribute.
             type_encoders: A mapping of types to callables that transform them into types supported for serialization.
             type_decoders: A sequence of tuples, each composed of a predicate testing for type identity and a msgspec hook for deserialization.
             **kwargs: Any additional kwarg - will be set in the opt dictionary.
@@ -138,19 +141,19 @@ class BaseRouteHandler:
         self.opt.update(**kwargs)
         self.owner: Controller | Router | None = None
         self.return_dto = return_dto
-        self.signature_namespace = signature_namespace or {}
+        self.signature_namespace = add_types_to_signature_namespace(
+            signature_types or [], dict(signature_namespace or {})
+        )
         self.type_decoders = type_decoders
         self.type_encoders = type_encoders
 
         self.paths = (
-            {normalize_path(p) for p in path}
-            if path and isinstance(path, list)
-            else {normalize_path(path or "/")}  # type: ignore
+            {normalize_path(p) for p in path} if path and isinstance(path, list) else {normalize_path(path or "/")}  # type: ignore
         )
 
     def __call__(self, fn: AsyncAnyCallable) -> Self:
         """Replace a function with itself."""
-        self._fn = Ref["MaybePartial[AsyncAnyCallable]"](fn)
+        self._fn = fn
         return self
 
     @property
@@ -189,15 +192,15 @@ class BaseRouteHandler:
         if self._signature_model is Empty:
             self._signature_model = SignatureModel.create(
                 dependency_name_set=self.dependency_name_set,
-                fn=cast("AnyCallable", self.fn.value),
+                fn=cast("AnyCallable", self.fn),
                 parsed_signature=self.parsed_fn_signature,
                 data_dto=self.resolve_data_dto(),
                 type_decoders=self.resolve_type_decoders(),
             )
-        return cast("type[SignatureModel]", self._signature_model)
+        return self._signature_model
 
     @property
-    def fn(self) -> Ref[MaybePartial[AsyncAnyCallable]]:
+    def fn(self) -> AsyncAnyCallable:
         """Get the handler function.
 
         Raises:
@@ -221,22 +224,22 @@ class BaseRouteHandler:
         """
         if self._parsed_fn_signature is Empty:
             self._parsed_fn_signature = ParsedSignature.from_fn(
-                unwrap_partial(self.fn.value), self.resolve_signature_namespace()
+                unwrap_partial(self.fn), self.resolve_signature_namespace()
             )
 
-        return cast("ParsedSignature", self._parsed_fn_signature)
+        return self._parsed_fn_signature
 
     @property
     def parsed_return_field(self) -> FieldDefinition:
         if self._parsed_return_field is Empty:
             self._parsed_return_field = self.parsed_fn_signature.return_type
-        return cast("FieldDefinition", self._parsed_return_field)
+        return self._parsed_return_field
 
     @property
     def parsed_data_field(self) -> FieldDefinition | None:
         if self._parsed_data_field is Empty:
             self._parsed_data_field = self.parsed_fn_signature.parameters.get("data")
-        return cast("FieldDefinition | None", self._parsed_data_field)
+        return self._parsed_data_field
 
     @property
     def handler_name(self) -> str:
@@ -248,7 +251,7 @@ class BaseRouteHandler:
         Returns:
             Name of the handler function
         """
-        return get_name(unwrap_partial(self.fn.value))
+        return get_name(unwrap_partial(self.fn))
 
     @property
     def dependency_name_set(self) -> set[str]:
@@ -320,7 +323,7 @@ class BaseRouteHandler:
                 for key, parameter in parameter_kwargs.items()
             }
 
-        return cast("dict[str, FieldDefinition]", self._resolved_layered_parameters)
+        return self._resolved_layered_parameters
 
     def resolve_guards(self) -> list[Guard]:
         """Return all guards in the handlers scope, starting from highest to current layer."""
@@ -330,9 +333,11 @@ class BaseRouteHandler:
             for layer in self.ownership_layers:
                 self._resolved_guards.extend(layer.guards or [])  # pyright: ignore
 
-            self._resolved_guards = cast("list[Guard]", [AsyncCallable(guard) for guard in self._resolved_guards])
+            self._resolved_guards = cast(
+                "list[Guard]", [ensure_async_callable(guard) for guard in self._resolved_guards]
+            )
 
-        return self._resolved_guards  # type:ignore
+        return self._resolved_guards
 
     def resolve_dependencies(self) -> dict[str, Provide]:
         """Return all dependencies correlating to handler function's kwargs that exist in the handler's scope."""
@@ -348,19 +353,22 @@ class BaseRouteHandler:
                         dependencies=self._resolved_dependencies, key=key, provider=provider
                     )
 
+                    if not getattr(provider, "parsed_signature", None):
+                        provider.parsed_fn_signature = ParsedSignature.from_fn(
+                            unwrap_partial(provider.dependency), self.resolve_signature_namespace()
+                        )
+
                     if not getattr(provider, "signature_model", None):
                         provider.signature_model = SignatureModel.create(
                             dependency_name_set=self.dependency_name_set,
-                            fn=provider.dependency.value,
-                            parsed_signature=ParsedSignature.from_fn(
-                                unwrap_partial(provider.dependency.value), self.resolve_signature_namespace()
-                            ),
+                            fn=provider.dependency,
+                            parsed_signature=provider.parsed_fn_signature,
                             data_dto=self.resolve_data_dto(),
                             type_decoders=self.resolve_type_decoders(),
                         )
 
                     self._resolved_dependencies[key] = provider
-        return cast("dict[str, Provide]", self._resolved_dependencies)
+        return self._resolved_dependencies
 
     def resolve_middleware(self) -> list[Middleware]:
         """Build the middleware stack for the RouteHandler and return it.
@@ -451,7 +459,7 @@ class BaseRouteHandler:
 
             self._resolved_data_dto = data_dto
 
-        return cast("type[AbstractDTO] | None", self._resolved_data_dto)
+        return self._resolved_data_dto
 
     def resolve_return_dto(self) -> type[AbstractDTO] | None:
         """Resolve the return_dto by starting from the route handler and moving up.
@@ -486,7 +494,7 @@ class BaseRouteHandler:
             else:
                 self._resolved_return_dto = None
 
-        return cast("type[AbstractDTO] | None", self._resolved_return_dto)
+        return self._resolved_return_dto
 
     async def authorize_connection(self, connection: ASGIConnection) -> None:
         """Ensure the connection is authorized by running all the route guards in scope."""
@@ -522,6 +530,15 @@ class BaseRouteHandler:
 
     def _validate_handler_function(self) -> None:
         """Validate the route handler function once set by inspecting its return annotations."""
+        if (
+            self.parsed_data_field is not None
+            and self.parsed_data_field.is_subclass_of(DTOData)
+            and not self.resolve_data_dto()
+        ):
+            raise ImproperlyConfiguredException(
+                f"Handler function {self.handler_name} has a data parameter that is a subclass of DTOData but no "
+                "DTO has been registered for it."
+            )
 
     def __str__(self) -> str:
         """Return a unique identifier for the route handler.
@@ -530,7 +547,7 @@ class BaseRouteHandler:
             A string
         """
         target: type[AsyncAnyCallable] | AsyncAnyCallable  # pyright: ignore
-        target = unwrap_partial(self.fn.value)
+        target = unwrap_partial(self.fn)
         if not hasattr(target, "__qualname__"):
             target = type(target)
         return f"{target.__module__}.{target.__qualname__}"

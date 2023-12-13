@@ -16,7 +16,9 @@ try:
 except ImportError:
     pytest.skip("Piccolo not installed", allow_module_level=True)
 
+import pytest
 from piccolo.columns import Column, column_types
+from piccolo.columns.column_types import Varchar
 from piccolo.conf.apps import Finder
 from piccolo.table import Table, create_db_tables, drop_db_tables
 
@@ -24,6 +26,16 @@ from litestar.contrib.piccolo import PiccoloDTO
 
 from .endpoints import create_concert, retrieve_studio, retrieve_venues, studio, venues
 from .tables import RecordingStudio, Venue
+
+
+def test_dto_deprecation() -> None:
+    class Manager(Table):
+        name = Varchar(length=50)
+
+    with pytest.deprecated_call():
+        from litestar.contrib.piccolo import PiccoloDTO
+
+        _ = PiccoloDTO[Manager]
 
 
 @pytest.fixture(autouse=True)
@@ -111,7 +123,7 @@ def test_piccolo_dto_openapi_spec_generation() -> None:
         == "#/components/schemas/RetrieveVenuesVenueResponseBody"
     )
 
-    concert_schema = schema.components.schemas["CreateConcertConcertRequestBody"]  # type: ignore
+    concert_schema = schema.components.schemas["CreateConcertConcertRequestBody"]
     assert concert_schema
     assert concert_schema.to_schema() == {
         "properties": {
@@ -124,7 +136,7 @@ def test_piccolo_dto_openapi_spec_generation() -> None:
         "type": "object",
     }
 
-    record_studio_schema = schema.components.schemas["RetrieveStudioRecordingStudioResponseBody"]  # type: ignore
+    record_studio_schema = schema.components.schemas["RetrieveStudioRecordingStudioResponseBody"]
     assert record_studio_schema
     assert record_studio_schema.to_schema() == {
         "properties": {
@@ -138,7 +150,7 @@ def test_piccolo_dto_openapi_spec_generation() -> None:
         "type": "object",
     }
 
-    venue_schema = schema.components.schemas["RetrieveVenuesVenueResponseBody"]  # type: ignore
+    venue_schema = schema.components.schemas["RetrieveVenuesVenueResponseBody"]
     assert venue_schema
     assert venue_schema.to_schema() == {
         "properties": {

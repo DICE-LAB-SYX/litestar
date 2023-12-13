@@ -6,6 +6,12 @@ import sys
 from contextlib import AbstractContextManager
 from typing import Any, AsyncContextManager, Awaitable, ContextManager, TypeVar, cast, overload
 
+from litestar._openapi.schema_generation import SchemaCreator
+from litestar._openapi.schema_generation.plugins import openapi_schema_plugins
+from litestar.openapi.spec import Schema
+from litestar.plugins import OpenAPISchemaPluginProtocol
+from litestar.typing import FieldDefinition
+
 T = TypeVar("T")
 
 
@@ -16,7 +22,7 @@ RANDOM = random.Random(b"bA\xcd\x00\xa9$\xa7\x17\x1c\x10")
 if sys.version_info < (3, 9):
 
     def randbytes(n: int) -> bytes:
-        return bytearray(RANDOM.getrandbits(8) for _ in range(n))
+        return RANDOM.getrandbits(8 * n).to_bytes(n, "little")
 
 else:
     randbytes = RANDOM.randbytes
@@ -51,3 +57,14 @@ def maybe_async_cm(obj: ContextManager[T] | AsyncContextManager[T]) -> AsyncCont
     if isinstance(obj, AbstractContextManager):
         return cast(AsyncContextManager[T], _AsyncContextManagerWrapper(obj))
     return obj
+
+
+def get_schema_for_field_definition(
+    field_definition: FieldDefinition, *, plugins: list[OpenAPISchemaPluginProtocol] | None = None
+) -> Schema:
+    plugins = [*openapi_schema_plugins, *(plugins or [])]
+    creator = SchemaCreator(plugins=plugins)
+    result = creator.for_field_definition(field_definition)
+    if isinstance(result, Schema):
+        return result
+    return creator.schema_registry.from_reference(result).schema

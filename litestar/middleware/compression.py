@@ -2,17 +2,14 @@ from __future__ import annotations
 
 from gzip import GzipFile
 from io import BytesIO
-from typing import TYPE_CHECKING, Any, Literal, Optional
+from typing import TYPE_CHECKING, Any, Literal
 
-from litestar.constants import SCOPE_STATE_IS_CACHED, SCOPE_STATE_RESPONSE_COMPRESSED
 from litestar.datastructures import Headers, MutableScopeHeaders
 from litestar.enums import CompressionEncoding, ScopeType
 from litestar.exceptions import MissingDependencyException
 from litestar.middleware.base import AbstractMiddleware
-from litestar.utils import Ref, get_litestar_scope_state, set_litestar_scope_state
-
-__all__ = ("CompressionFacade", "CompressionMiddleware")
-
+from litestar.utils.empty import value_or_default
+from litestar.utils.scope.state import ScopeState
 
 if TYPE_CHECKING:
     from litestar.config.compression import CompressionConfig
@@ -29,6 +26,8 @@ if TYPE_CHECKING:
         from brotli import Compressor
     except ImportError:
         Compressor = Any
+
+__all__ = ("CompressionFacade", "CompressionMiddleware")
 
 
 class CompressionFacade:
@@ -173,10 +172,12 @@ class CompressionMiddleware(AbstractMiddleware):
         bytes_buffer = BytesIO()
         facade = CompressionFacade(buffer=bytes_buffer, compression_encoding=compression_encoding, config=self.config)
 
-        initial_message = Ref[Optional["HTTPResponseStartEvent"]](None)
-        started = Ref[bool](False)
+        initial_message: HTTPResponseStartEvent | None = None
+        started = False
 
         _own_encoding = compression_encoding.encode("latin-1")
+
+        connection_state = ScopeState.from_scope(scope)
 
         async def send_wrapper(message: Message) -> None:
             """Handle and compresses the HTTP Message with brotli.
@@ -184,35 +185,37 @@ class CompressionMiddleware(AbstractMiddleware):
             Args:
                 message (Message): An ASGI Message.
             """
+            nonlocal started
+            nonlocal initial_message
 
             if message["type"] == "http.response.start":
-                initial_message.value = message
+                initial_message = message
                 return
 
-            if initial_message.value and get_litestar_scope_state(scope, SCOPE_STATE_IS_CACHED):
-                await send(initial_message.value)
+            if initial_message is not None and value_or_default(connection_state.is_cached, False):
+                await send(initial_message)
                 await send(message)
                 return
 
-            if initial_message.value and message["type"] == "http.response.body":
+            if initial_message and message["type"] == "http.response.body":
                 body = message["body"]
                 more_body = message.get("more_body")
 
-                if not started.value:
-                    started.value = True
+                if not started:
+                    started = True
                     if more_body:
-                        headers = MutableScopeHeaders(initial_message.value)
+                        headers = MutableScopeHeaders(initial_message)
                         headers["Content-Encoding"] = compression_encoding
                         headers.extend_header_value("vary", "Accept-Encoding")
                         del headers["Content-Length"]
-                        set_litestar_scope_state(scope, SCOPE_STATE_RESPONSE_COMPRESSED, True)
+                        connection_state.response_compressed = True
 
                         facade.write(body)
 
                         message["body"] = bytes_buffer.getvalue()
                         bytes_buffer.seek(0)
                         bytes_buffer.truncate()
-                        await send(initial_message.value)
+                        await send(initial_message)
                         await send(message)
 
                     elif len(body) >= self.config.minimum_size:
@@ -220,18 +223,18 @@ class CompressionMiddleware(AbstractMiddleware):
                         facade.close()
                         body = bytes_buffer.getvalue()
 
-                        headers = MutableScopeHeaders(initial_message.value)
+                        headers = MutableScopeHeaders(initial_message)
                         headers["Content-Encoding"] = compression_encoding
                         headers["Content-Length"] = str(len(body))
                         headers.extend_header_value("vary", "Accept-Encoding")
                         message["body"] = body
-                        set_litestar_scope_state(scope, SCOPE_STATE_RESPONSE_COMPRESSED, True)
+                        connection_state.response_compressed = True
 
-                        await send(initial_message.value)
+                        await send(initial_message)
                         await send(message)
 
                     else:
-                        await send(initial_message.value)
+                        await send(initial_message)
                         await send(message)
 
                 else:

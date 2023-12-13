@@ -1,4 +1,5 @@
 import logging
+import sys
 from typing import TYPE_CHECKING, Any, Dict
 from unittest.mock import Mock, patch
 
@@ -62,14 +63,6 @@ def test_dictconfig_startup(dict_config_class: str, handlers: Any) -> None:
         )
         with create_test_client([], on_startup=[test_logger.configure]):
             assert dict_config_mock.called
-
-
-LoggingConfig(
-    handlers=default_handlers,
-    loggers={
-        "test_logger": {"level": "INFO", "handlers": ["queue_listener"], "propagate": True},
-    },
-).configure()
 
 
 def test_standard_queue_listener_logger(caplog: "LogCaptureFixture") -> None:
@@ -138,20 +131,26 @@ def test_root_logger(handlers: Any, listener: Any) -> None:
     logging_config = LoggingConfig(handlers=handlers)
     get_logger = logging_config.configure()
     root_logger = get_logger()
-    isinstance(root_logger.handlers[0], listener)  # type: ignore
+    assert isinstance(root_logger.handlers[0], listener)  # type: ignore
 
 
 @pytest.mark.parametrize(
     "handlers, listener",
     [
-        [default_handlers, StandardQueueListenerHandler],
+        pytest.param(
+            default_handlers,
+            StandardQueueListenerHandler,
+            marks=pytest.mark.xfail(
+                condition=sys.version_info >= (3, 12), reason="change to QueueHandler/QueueListener config in 3.12"
+            ),
+        ),
         [default_picologging_handlers, PicologgingQueueListenerHandler],
     ],
 )
-def test_customizing_handler(handlers: Any, listener: Any) -> None:
-    handlers["queue_listener"]["handlers"] = ["cfg://handlers.console"]
+def test_customizing_handler(handlers: Any, listener: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(handlers["queue_listener"], "handlers", ["cfg://handlers.console"])
 
     logging_config = LoggingConfig(handlers=handlers)
     get_logger = logging_config.configure()
     root_logger = get_logger()
-    isinstance(root_logger.handlers[0], listener)  # type: ignore
+    assert isinstance(root_logger.handlers[0], listener)  # type: ignore

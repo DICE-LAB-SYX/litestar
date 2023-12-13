@@ -30,7 +30,6 @@ if TYPE_CHECKING:
     from litestar.static_files.config import StaticFilesConfig
     from litestar.stores.base import Store
     from litestar.stores.registry import StoreRegistry
-    from litestar.template.config import TemplateConfig
     from litestar.types import (
         AfterExceptionHookHandler,
         AfterRequestHookHandler,
@@ -50,6 +49,7 @@ if TYPE_CHECKING:
     from litestar.types.callable_types import LifespanHook
     from litestar.types.composite_types import TypeDecodersSequence
     from litestar.types.empty import EmptyType
+    from litestar.types.internal_types import TemplateConfigType
 
 
 __all__ = (
@@ -159,7 +159,7 @@ class AppConfig:
     """An optional subclass of :class:`Request <.connection.Request>` to use for http connections."""
     response_class: ResponseType | None = field(default=None)
     """A custom subclass of :class:`Response <.response.Response>` to be used as the app's default response."""
-    response_cookies: ResponseCookies = field(default_factory=list)  # type: ignore
+    response_cookies: ResponseCookies = field(default_factory=list)
     """A list of :class:`Cookie <.datastructures.Cookie>`."""
     response_headers: Sequence[ResponseHeader] = field(default_factory=list)
     """A string keyed dictionary mapping :class:`ResponseHeader <.datastructures.ResponseHeader>`."""
@@ -179,7 +179,12 @@ class AppConfig:
     :data:`SecurityRequirement <.openapi.spec.SecurityRequirement>` for details.
     """
     signature_namespace: dict[str, Any] = field(default_factory=dict)
-    """A mapping of names to types for use in forward reference resolution during signature modelling."""
+    """A mapping of names to types for use in forward reference resolution during signature modeling."""
+    signature_types: list[Any] = field(default_factory=list)
+    """A sequence of types for use in forward reference resolution during signature modeling.
+
+    These types will be added to the signature namespace using their ``__name__`` attribute.
+    """
     state: State = field(default_factory=State)
     """A :class:`State` <.datastructures.State>` instance holding application state."""
     static_files_config: list[StaticFilesConfig] = field(default_factory=list)
@@ -191,7 +196,7 @@ class AppConfig:
     """
     tags: list[str] = field(default_factory=list)
     """A list of string tags that will be appended to the schema of all route handlers under the application."""
-    template_config: TemplateConfig | None = field(default=None)
+    template_config: TemplateConfigType | None = field(default=None)
     """An instance of :class:`TemplateConfig <.template.TemplateConfig>`."""
     type_encoders: TypeEncodersMap | None = field(default=None)
     """A mapping of types to callables that transform them into types supported for serialization."""

@@ -3,6 +3,821 @@
 2.x Changelog
 =============
 
+.. changelog:: 2.4.4
+    :date: 2023/12/13
+
+    .. change:: Support non-valid identifier as serialization target name
+        :type: bugfix
+        :pr: 2850
+        :issue: 2845
+
+        Fix a bug where DTOs would raise a ``TypeError: __slots__ must be identifiers``
+        during serialization, if a non-valid identifier (such as ``field-name``)was used
+        for field renaming.
+
+    .. change:: Fix regression signature validation for DTO validated types
+        :type: bugfix
+        :pr: 2854
+        :issue: 2149
+
+        Fix a regression introduced in ``2.0.0rc1`` that would cause data validated by
+        the DTO to be validated again by the signature model.
+
+    .. change:: Fix regression in OpenAPI schema key names
+        :type: bugfix
+        :pr: 2841
+        :issue: 2804
+
+        Fix a regression introduced in ``2.4.0`` regarding the naming of OpenAPI schema
+        keys, in which a change was introduced to the way that keys for the OpenAPI
+        components/schemas objects were calculated to address the possibility of name
+        collisions.
+
+        This behaviour was reverted for the case where a name has no collision, and now
+        only introduces extended keys for the case where there are multiple objects with
+        the same name, a case which would previously result in an exception.
+
+    .. change:: Fix regression in OpenAPI handling of routes with multiple handlers
+        :type: bugfix
+        :pr: 2864
+        :issue: 2863
+
+        Fix a regression introduced in ``2.4.3`` causing two routes registered with the
+        same path, but different methods to break OpenAPI schema generation due to both
+        of them having the same value for operation ID.
+
+    .. change:: Fix OpenAPI schema generation for recursive models
+        :type: bugfix
+        :pr: 2869
+        :issue: 2429
+
+        Fix an issue that would lead to a :exc:`RecursionError` when including nested
+        models in the OpenAPI schema.
+
+
+.. changelog:: 2.4.3
+    :date: 2023/12/07
+
+    .. change:: Fix OpenAPI schema for ``Literal | None`` unions
+        :type: bugfix
+        :issue: 2812
+        :pr: 2818
+
+        Fix a bug where an incorrect OpenAPI schema was generated generated when any
+        ``Literal | None``-union was present in an annotation.
+
+        For example
+
+        .. code-block:: python
+
+            type: Literal["sink", "source"] | None
+
+        would generate
+
+        .. code-block:: json
+
+            {
+              "name": "type",
+              "in": "query",
+              "schema": {
+                "type": "string",
+                "enum": [ "sink", "source", null ]
+              }
+            }
+
+    .. change:: Fix advanced-alchemy 0.6.0 compatibility issue with ``touch_updated_timestamp``
+        :type: bugfix
+        :pr: 2843
+
+        Fix an incorrect import for ``touch_updated_timestamp`` of Advanced Alchemy,
+        introduced in Advanced-Alchemy version 0.6.0.
+
+.. changelog:: 2.4.2
+    :date: 2023/12/02
+
+    .. change:: Fix OpenAPI handling of parameters with duplicated names
+        :type: bugfix
+        :issue: 2662
+        :pr: 2788
+
+        Fix a bug where schema generation would consider two parameters with the same
+        name but declared in different places (eg., header, cookie) as an error.
+
+    .. change:: Fix late failure where ``DTOData`` is used without a DTO
+        :type: bugfix
+        :issue: 2779
+        :pr: 2789
+
+        Fix an issue where a handler would be allowed to be registered with a
+        ``DTOData`` annotation without having a DTO defined, which would result in a
+        runtime exception. In cases like these, a configuration error is now raised
+        during startup.
+
+    .. change:: Correctly propagate camelCase names on OpenAPI schema
+        :type: bugfix
+        :pr: 2800
+
+        Fix a bug where OpenAPI schema fields would be inappropriately propagated as
+        camelCase where they should have been snake_case
+
+    .. change:: Fix error handling in event handler stream
+        :type: bugfix
+        :pr: 2810, 2814
+
+        Fix a class of errors that could result in the event listener stream being
+        terminated when an exception occurred within an event listener. Errors in
+        event listeners are now not propagated anymore but handled by the backend and
+        logged instead.
+
+    .. change:: Fix OpenAPI schema for pydantic computed fields
+        :type: bugfix
+        :pr: 2797
+        :issue: 2792
+
+        Add support for including computed fields in schemas generated from pydantic
+        models.
+
+.. changelog:: 2.4.1
+    :date: 2023/11/28
+
+    .. change:: Fix circular import when importing from ``litestar.security.jwt``
+        :type: bugfix
+        :pr: 2784
+        :issue: 2782
+
+        An :exc:`ImportError` was raised when trying to import from ``litestar.security.jwt``. This was fixed
+        by removing the imports from the deprecated ``litestar.contrib.jwt`` within ``litesetar.security.jwt``.
+
+    .. change:: Raise config error when generator dependencies are cached
+        :type: bugfix
+        :pr: 2780
+        :issue: 2771
+
+        Previously, an :exc:`InternalServerError` was raised when attempting to use
+        `use_cache=True` with generator dependencies. This will now raise a configuration
+        error during application startup.
+
+.. changelog:: 2.4.0
+    :date: 2023/11/27
+
+    .. change:: Fix ``HTTPException`` handling during concurrent dependency resolving
+        :type: bugfix
+        :pr: 2596
+        :issue: 2594
+
+        An issue was fixed that would lead to :exc:`HTTPExceptions` not being re-raised
+        properly when they occurred within the resolution of nested dependencies during
+        the request lifecycle.
+
+    .. change:: Fix OpenAPI examples format
+        :type: bugfix
+        :pr: 2660
+        :issue: 2272
+
+        Fix the OpenAPI examples format by removing the wrapping object.
+
+        Before the change, for a given model
+
+        .. code-block:: python
+
+            @dataclass
+            class Foo:
+                foo: int
+
+        The following example would be generated:
+
+        .. code-block:: json
+
+            {
+                "description": "Example value",
+                "value": {
+                    "foo": 7906
+                }
+            }
+
+        After the fix, this is now:
+
+        .. code-block:: json
+
+                {
+                    "foo": 7906
+                }
+
+    .. change:: Fix CLI plugin commands not showing up in command list
+        :type: bugfix
+        :pr: 2441
+
+        Fix a bug where commands registered by CLI plugins were available, but would not
+        show up in the commands list
+
+    .. change:: Fix missing ``write-only`` mark in ``dto_field()`` signature
+        :type: bugfix
+        :pr: 2684
+
+        Fix the missing ``write-only`` string literal in the ``mark`` parameter of
+        :func:`~litestar.dto.field.dto_field`
+
+    .. change:: Fix OpenAPI schemas incorrectly flagged as duplicates
+        :type: bugfix
+        :pr: 2475
+        :issue: 2471
+
+        Fix an issue that would lead to OpenAPI schemas being incorrectly considered
+        duplicates, resulting in an :exc:`ImproperlyConfiguredException` being raised.
+
+    .. change:: Fix Pydantic URL type support in OpenAPI and serialization
+        :type: bugfix
+        :pr: 2701
+        :issue: 2664
+
+        Add missing support for Pydantic's URL types (``AnyUrl`` and its descendants)
+        for both serialization and OpenAPI schema generation. These types were only
+        partially supported previously; Serialization support was lacking for v1 and v2,
+        and OpenAPI support was missing for v2.
+
+    .. change:: Fix incorrect ``ValidationException`` message when multiple errors were encountered
+        :type: bugfix
+        :pr: 2716
+        :issue: 2714
+
+        Fix a bug where :exc:`ValidationException` could contain duplicated messages in
+        ``extra`` field, when multiple errors were encountered during validation
+
+    .. change:: Fix DTO renaming renames all fields of the same name in nested DTOs
+        :type: bugfix
+        :pr: 2764
+        :issue: 2721
+
+        Fix an issue with nested field renaming in DTOs that would lead to all fields
+        with a given name to be renamed in a nested structure.
+
+        In the below example, both ``Foo.id`` and ``Bar.id`` would have been renamed to
+        ``foo_id``
+
+        .. code-block:: python
+
+            from dataclasses import dataclass
+
+
+            @dataclass
+            class Bar:
+                id: str
+
+
+            @dataclass
+            class Foo:
+                id: str
+                bar: Bar
+
+
+            FooDTO = DataclassDTO[Annotated[Foo, DTOConfig(rename_fields={"id": "foo_id"})]]
+
+    .. change:: Fix handling of DTO objects nested in mappings
+        :type: bugfix
+        :pr: 2775
+        :issue: 2737
+
+        Fix a bug where DTOs nested in a :class:`~typing.Mapping` type would fail to
+        serialize correctly.
+
+    .. change:: Fix inconsistent sequence union parameter errors
+        :type: bugfix
+        :pr: 2776
+        :issue: 2600
+
+        Fix a bug where unions of collection types would result in different errors
+        depending on whether the union included :obj:`None` or not.
+
+    .. change:: Fix graceful handling of WebSocket disconnect in channels WebSockets handlers
+        :type: bugfix
+        :pr: 2691
+
+        Fix the behaviour of WebSocket disconnect handling within the WebSocket handlers
+        provided by :doc:`channels </usage/channels>`, that would sometimes lead to
+        a ``RuntimeError: Unexpected ASGI message 'websocket.close', after sending 'websocket.close'.``
+        exception being raised upon the closing of a WebSocket connection.
+
+
+    .. change:: Add ``server_lifespan`` hook
+        :type: feature
+        :pr: 2658
+
+        A new ``server_lifespan`` hook is now available on :class:`~litestar.app.Litestar`.
+        This hook works similar to the regular ``lifespan`` context manager, with the
+        difference being is that it is only called once for the entire server lifespan,
+        not for each application startup phase. Note that these only differ when running
+        with an ASGI server that's using multiple worker processes.
+
+    .. change:: Allow rendering templates directly from strings
+        :type: feature
+        :pr: 2689
+        :issue: 2687
+
+        A new ``template_string`` parameter was added to :class:`~litestar.template.Template`,
+        allowing to render templates directly from strings.
+
+        .. seealso::
+            :ref:`usage/templating:Template Files vs. Strings`
+
+    .. change:: Support nested DTO field renaming
+        :type: feature
+        :pr: 2764
+        :issue: 2721
+
+        Using similar semantics as for exclusion/inclusion, nested DTO fields can now
+        also be renamed:
+
+        .. code-block:: python
+
+            from dataclasses import dataclass
+
+
+            @dataclass
+            class Bar:
+                id: str
+
+
+            @dataclass
+            class Foo:
+                id: str
+                bars: list[Bar]
+
+
+            FooDTO = DataclassDTO[Annotated[Foo, DTOConfig(rename_fields={"bars.0.id": "bar_id"})]]
+
+
+.. changelog:: 2.3.2
+    :date: 2023/11/06
+
+    .. change:: Fix recursion error when re-using the path of a route handler for static files
+        :type: bugfix
+        :pr: 2630
+        :issue: 2629
+
+        A regression was fixed that would cause a recursion error when the path of a
+        static files host was reused for a route handler with a different HTTP method.
+
+        .. code-block:: python
+
+            from litestar import Litestar
+            from litestar import post
+            from litestar.static_files import StaticFilesConfig
+
+
+            @post("/uploads")
+            async def handler() -> None:
+                pass
+
+
+            app = Litestar(
+                [handler],
+                static_files_config=[
+                    StaticFilesConfig(directories=["uploads"], path="/uploads"),
+                ],
+            )
+
+
+.. changelog:: 2.3.1
+    :date: 2023/11/04
+
+    .. change:: CLI: Fix not providing SSL certfiles breaks uvicorn command when using reload or multiple workers
+        :type: bugfix
+        :pr: 2616
+        :issue: 2613
+
+        Fix an issue where not providing the ``--ssl-certfile`` and ``--ssl-keyfile``
+        options to the ``litestar run`` command would cause a :exc:`FileNotFoundError`
+        in uvicorn, when used together with the ``--reload``, ``--web-concurrency``
+        options.
+
+
+.. changelog:: 2.3.0
+    :date: 2023/11/02
+
+    .. change:: Python 3.12 support
+        :type: feature
+        :pr: 2396
+        :issue: 1862
+
+        Python 3.12 is now fully supported and tested.
+
+    .. change:: New layered parameter ``signature_types``
+        :type: feature
+        :pr: 2422
+
+        Types in this collection are added to ``signature_namespace`` using the type's
+        ``__name__`` attribute.
+        This provides a nicer interface when adding names to the signature namespace
+        w ithout modifying the type name, e.g.: ``signature_namespace={"Model": Model}``
+        is equivalent to ``signature_types=[Model]``.
+
+        The implementation makes it an error to supply a type in ``signature_types``
+        that has a value for ``__name__`` already in the signature namespace.
+
+        It will also throw an error if an item in ``signature_types`` has no
+        ``__name__`` attribute.
+
+    .. change:: Added RapiDoc for OpenAPI schema visualisation
+        :type: feature
+        :pr: 2522
+
+        Add support for using `RapiDoc <https://github.com/rapi-doc/RapiDoc>`_ for
+        OpenAPI schema visualisation.
+
+    .. change:: Support Pydantic 1 & 2 within the same application
+        :type: feature
+        :pr: 2487
+
+        Added support for Pydantic 1 & 2 within the same application by integrating with
+        Pydantic's backwards compatibility layer:
+
+        .. code-block:: python
+
+            from litestar import get
+            from pydantic.v1 import BaseModel as BaseModelV1
+            from pydantic import BaseModel
+
+
+            class V1Foo(BaseModelV1):
+                bar: str
+
+
+            class V2Foo(BaseModel):
+                bar: str
+
+
+            @get("/1")
+            def foo_v1(data: V1Foo) -> V1Foo:
+                return data
+
+
+            @get("/2")
+            def foo_v2(data: V2Foo) -> V2Foo:
+                return data
+
+    .. change:: Add ``ResponseCacheConfig.cache_response_filter`` to allow filtering responses eligible for caching
+        :type: feature
+        :pr: 2537
+        :issue: 2501
+
+        ``ResponseCacheConfig.cache_response_filter`` is predicate called by the
+        response cache middleware that discriminates whether a response should be
+        cached, or not.
+
+
+    .. change:: SSL support and self-signed certificates for CLI
+        :type: feature
+        :pr: 2554
+        :issue: 2335
+
+        Add support for SSL and generating self-signed certificates to the CLI.
+
+        For this, three new arguments were added to the CLI's ``run`` command:
+
+        - ``--ssl-certfile``
+        - ``--ssl-keyfile``
+        - ``--create-self-signed-cert``
+
+        The ``--ssl-certfile`` and `--ssl-keyfile` flags are passed to uvicorn when
+        using ``litestar run``. Uvicorn requires both to be passed (or neither) but
+        additional validation was added to generate a more user friendly CLI errors.
+
+        The other SSL-related flags (like password or CA) were not added (yet). See
+        `uvicorn CLI docs <https://www.uvicorn.org/#command-line-options>`_
+
+        **Generating of a self-signed certificate**
+
+        One more CLI flag was added (``--create-devcert``) that uses the
+        ``cryptography`` module to generate a self-signed development certificate. Both
+        of the previous flags must be passed when using this flag. Then the following
+        logic is used:
+
+        - If both files already exists, they are used and nothing is generated
+        - If neither file exists, the dev cert and key are generated
+        - If only one file exists, it is ambiguous what to do so an exception is raised
+
+    .. change:: Use custom request class when given during exception handling
+        :type: bugfix
+        :pr: 2444
+        :issue: 2399
+
+        When a custom ``request_class`` is provided, it will now be used while returning
+        an error response
+
+    .. change:: Fix missing OpenAPI schema for generic response type annotations
+        :type: bugfix
+        :pr: 2463
+        :issue: 2383
+
+        OpenAPI schemas are now correctly generated when a response type annotation
+        contains a generic type such as
+
+        .. code-block:: python
+
+            from msgspec import Struct
+            from litestar import Litestar, get, Response
+            from typing import TypeVar, Generic, Optional
+
+            T = TypeVar("T")
+
+
+            class ResponseStruct(Struct, Generic[T]):
+                code: int
+                data: Optional[T]
+
+
+            @get("/")
+            def test_handler() -> Response[ResponseStruct[str]]:
+                return Response(
+                    ResponseStruct(code=200, data="Hello World"),
+                )
+
+    .. change:: Fix rendering of OpenAPI examples
+        :type: bugfix
+        :pr: 2509
+        :issue: 2494
+
+        An issue was fixed where OpenAPI examples would be rendered as
+
+        .. code-block:: json
+
+            {
+              "parameters": [
+                {
+                  "schema": {
+                    "type": "string",
+                    "examples": [
+                      {
+                        "summary": "example summary",
+                        "value": "example value"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+
+        instead of
+
+        .. code-block:: json
+
+            {
+              "parameters": [
+                {
+                  "schema": {
+                    "type": "string"
+                  },
+                  "examples": {
+                    "example1": {
+                      "summary": "example summary"
+                      "value": "example value"
+                    }
+                  }
+                }
+              ]
+            }
+
+    .. change:: Fix non UTF-8 handling when logging requests
+        :type: bugfix
+        :issue: 2529
+        :pr: 2530
+
+        When structlog is not installed, the request body would not get parsed and shown
+        as a byte sequence. Instead, it was serialized into a string with the assumption
+        that it is valid UTF-8. This was fixed by decoding the bytes with
+        ``backslashreplace`` before displaying them.
+
+    .. change:: Fix ``ExceptionHandler`` typing to properly support ``Exception`` subclasses
+        :type: bugfix
+        :issue: 2520
+        :pr: 2533
+
+        Fix the typing for ``ExceptionHandler`` to support subclasses of ``Exception``,
+        such that code like this will type check properly:
+
+        .. code-block:: python
+
+            from litestar import Litestar, Request, Response
+
+
+            class CustomException(Exception):
+                ...
+
+
+            def handle_exc(req: Request, exc: CustomException) -> Response:
+                ...
+
+    .. change:: Fix OpenAPI schema generation for variable length tuples
+        :type: bugfix
+        :issue: 2460
+        :pr: 2552
+
+        Fix a bug where an annotation such as ``tuple[str, ...]`` would cause a
+        ``TypeError: '<' not supported between instances of 'NoneType' and 'OpenAPIType')``.
+
+    .. change:: Fix channels performance issue when polling with no subscribers in ``arbitrary_channels_allowed`` mode
+        :type: bugfix
+        :pr: 2547
+
+        Fix a bug that would cause high CPU loads while idling when using a
+        ``ChannelsPlugin`` with the ``arbitrary_channels_allowed`` enabled and while no
+        subscriptions for any channel were active.
+
+    .. change:: Fix CLI schema export for non-serializable types when using ``create_examples=True``
+        :type: bugfix
+        :pr: 2581
+        :issue: 2575
+
+        When trying to export a schema via the
+        ``litestar schema openapi --output schema.json`` making use of a non-JSON
+        serializable type, would result in an encoding error because the standard
+        library JSON serializer was used. This has been fixed by using Litestar's own
+        JSON encoder, enabling the serialization of all types supplied by the schema.
+
+    .. change:: Fix OpenAPI schema generation for ``Literal`` and ``Enum`` unions with ``None``
+        :type: bugfix
+        :pr: 2550
+        :issue: 2546
+
+        Existing behavior was to make the schema for every type that is a union with
+        ``None`` a ``"one_of"`` schema, that includes ``OpenAPIType.NULL`` in the
+        ``"one_of"`` types.
+
+        When a ``Literal`` or ``Enum`` type is in a union with ``None``, this behavior
+        is not desirable, as we want to have ``null`` available in the list of available
+        options on the type's schema.
+
+        This was fixed by modifying ``Literal`` and ``Enum`` schema generation so that i
+        t can be identified that the types are in a union with ``None``, allowing
+        ``null`` to be included in ``Schema.enum`` values.
+
+    .. change:: Fix cache overrides when using same route with different handlers
+        :type: bugfix
+        :pr: 2592
+        :issue: 2573, 2588
+
+        A bug was fixed that would cause the cache for routes being overwritten by a
+        route handler on that same route with a different HTTP method.
+
+
+
+.. changelog:: 2.2.0
+    :date: 2023/10/12
+
+    .. change:: Fix implicit conversion of objects to ``bool`` in debug response
+        :type: bugfix
+        :pr: 2384
+        :issue: 2381
+
+        The exception handler middleware would, when in debug mode, implicitly call an
+        object's :meth:`__bool__ <object.__bool__>`, which would lead to errors if that
+        object overloaded the operator, for example if the object in question was a
+        SQLAlchemy element.
+
+    .. change:: Correctly re-export filters and exceptions from ``advanced-alchemy``
+        :type: bugfix
+        :pr: 2360
+        :issue: 2358
+
+        Some re-exports of filter and exception types from ``advanced-alchemy`` were
+        missing, causing various issues when ``advanced-alchemy`` was installed, but
+        Litestar would still use its own version of these classes.
+
+    .. change:: Re-add ``create_engine`` method to SQLAlchemy configs
+        :type: bugfix
+        :pr: 2382
+
+        The ``create_engine`` method was removed in an ``advanced-alchemy`` releases.
+        This was addresses by re-adding it to the versions provided by Litestar.
+
+    .. change:: Fix ``before_request`` modifies route handler signature
+        :type: bugfix
+        :pr: 2391
+        :issue: 2368
+
+        The ``before_request`` would modify the return annotation of associated
+        route handlers to conform with its own return type annotation, which would cause
+        issues and unexpected behaviour when that annotation was not compatible with the
+        original one.
+
+        This was fixed by not having the ``before_request`` handler modify the
+        route handler's signature. Users are now expected to ensure that values returned
+        from a ``before_request`` handler conform to the return type annotation of the
+        route handler.
+
+    .. change:: Ensure compression is applied before caching when using compression middleware
+        :type: bugfix
+        :pr: 2393
+        :issue: 1301
+
+        A previous limitation was removed that would apply compression from the
+        :class:`~litestar.middleware.compression.CompressionMiddleware` only *after* a
+        response was restored from the cache, resulting in unnecessary repeated
+        computation and increased size of the stored response.
+
+        This was due to caching being handled on the response layer, where a response
+        object would be pickled, restored upon a cache hit and then re-sent, including
+        all middlewares.
+
+        The new implementation now instead applies caching on the ASGI level; Individual
+        messages sent to the ``send`` callable are cached, and later re-sent. This
+        process ensures that the compression middleware has been applied before, and
+        will be skipped when re-sending a cached response.
+
+        In addition, this increases performance and reduces storage size even in cases
+        where no compression is applied because the slow and inefficient pickle format
+        can be avoided.
+
+    .. change:: Fix implicit JSON parsing of URL encoded data
+        :type: bugfix
+        :pr: 2394
+
+        A process was removed where Litestar would implicitly attempt to parse parts of
+        URL encoded data as JSON. This was originally added to provide some performance
+        boosts when that data was in fact meant to be JSON, but turned out to be too
+        fragile.
+
+        Regular data conversion / validation is unaffected by this.
+
+    .. change:: CLI enabled by default
+        :type: feature
+        :pr: 2346
+        :issue: 2318
+
+        The CLI and all its dependencies are now included by default, to enable a better
+        and more consistent developer experience out of the box.
+
+        The previous ``litestar[cli]`` extra is still available for backwards
+        compatibility, but as of ``2.2.0`` it is without effect.
+
+    .. change:: Customization of Pydantic integration via ``PydanticPlugin``
+        :type: feature
+        :pr: 2404
+        :issue: 2373
+
+        A new :class:`~litestar.contrib.pydantic.PydanticPlugin` has been added, which
+        can be used to configure Pydantic behaviour. Currently it supports setting a
+        ``prefer_alias`` option, which will pass the ``by_alias=True`` flag to Pydantic
+        when exporting models, as well as generate schemas accordingly.
+
+    .. change:: Add ``/schema/openapi.yml`` to the available schema paths
+        :type: feature
+        :pr: 2411
+
+        The YAML version of the OpenAPI schema is now available under
+        ``/schema/openapi.yml`` in addition to ``/schema/openapi.yaml``.
+
+    .. change:: Add experimental DTO codegen backend
+        :type: feature
+        :pr: 2388
+
+        A new DTO backend was introduced which speeds up the transfer process by
+        generating optimized Python code ahead of time. Testing shows that the new
+        backend is between 2.5 and 5 times faster depending on the operation and data
+        provided.
+
+        The new backend can be enabled globally for all DTOs by passing the appropriate
+        feature flag to the Litestar application:
+
+        .. code-block:: python
+
+            from litestar import Litestar
+            from litestar.config.app import ExperimentalFeatures
+
+            app = Litestar(experimental_features=[ExperimentalFeatures.DTO_CODEGEN])
+
+        .. seealso::
+            For more information see
+            :ref:`usage/dto/0-basic-use:Improving performance with the codegen backend`
+
+
+    .. change:: Improved error messages for missing required parameters
+        :type: feature
+        :pr: 2418
+
+        Error messages for missing required parameters will now also contain the source
+        of the expected parameter:
+
+        Before:
+
+        .. code-block:: json
+
+            {
+              "status_code": 400,
+              "detail": "Missing required parameter foo for url http://testerver.local"
+            }
+
+
+        After:
+
+        .. code-block:: json
+
+            {
+              "status_code": 400,
+              "detail": "Missing required header parameter 'foo' for url http://testerver.local"
+            }
+
+
 .. changelog:: 2.1.1
     :date: 2023/09/24
 
@@ -343,7 +1158,7 @@
         :pr: 2160
 
         Fix a regression that would make
-        :class:`~litestar.contrib.jwt.JWTAuthenticationMiddleware` authenticate
+        ``litestar.contrib.jwt.JWTAuthenticationMiddleware`` authenticate
         ``OPTIONS`` and ``HEAD`` requests by default.
 
     .. change:: SessionAuth | Regression: ``OPTIONS`` and ``HEAD`` being authenticated by default
@@ -910,8 +1725,8 @@
         :type: feature
         :pr: 1695
 
-        Add the :attr:`extras <litestar.contrib.jwt.Token.extras>` attribute, containing
-        extra attributes found on the JWT.
+        Add the ``litestar.contrib.jwt.Token.extras`` attribute, containing extra
+        attributes found on the JWT.
 
     .. change:: Add default modes for ``Websocket.iter_json`` and ``WebSocket.iter_data``
         :type: feature

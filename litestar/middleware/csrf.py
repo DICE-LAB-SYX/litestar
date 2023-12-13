@@ -15,9 +15,7 @@ from litestar.middleware._utils import (
     should_bypass_middleware,
 )
 from litestar.middleware.base import MiddlewareProtocol
-
-__all__ = ("CSRFMiddleware",)
-
+from litestar.utils.scope.state import ScopeState
 
 if TYPE_CHECKING:
     from litestar.config.csrf import CSRFConfig
@@ -31,6 +29,9 @@ if TYPE_CHECKING:
         Scopes,
         Send,
     )
+
+__all__ = ("CSRFMiddleware",)
+
 
 CSRF_SECRET_BYTES = 32
 CSRF_SECRET_LENGTH = CSRF_SECRET_BYTES * 2
@@ -109,16 +110,21 @@ class CSRFMiddleware(MiddlewareProtocol):
             form = await request.form()
             existing_csrf_token = form.get("_csrf_token", None)
 
+        connection_state = ScopeState.from_scope(scope)
         if request.method in self.config.safe_methods or should_bypass_middleware(
             scope=scope,
             scopes=self.scopes,
             exclude_opt_key=self.config.exclude_from_csrf_key,
             exclude_path_pattern=self.exclude,
         ):
-            token = scope["_csrf_token"] = csrf_cookie or generate_csrf_token(secret=self.config.secret)  # type: ignore
+            token = connection_state.csrf_token = csrf_cookie or generate_csrf_token(secret=self.config.secret)
             await self.app(scope, receive, self.create_send_wrapper(send=send, csrf_cookie=csrf_cookie, token=token))
-        elif self._csrf_tokens_match(existing_csrf_token, csrf_cookie):
-            scope["_csrf_token"] = existing_csrf_token  # type: ignore
+        elif (
+            existing_csrf_token is not None
+            and csrf_cookie is not None
+            and self._csrf_tokens_match(existing_csrf_token, csrf_cookie)
+        ):
+            connection_state.csrf_token = existing_csrf_token
             await self.app(scope, receive, send)
         else:
             raise PermissionDeniedException("CSRF token verification failed")
@@ -174,11 +180,8 @@ class CSRFMiddleware(MiddlewareProtocol):
         expected_hash = generate_csrf_hash(token=token_secret, secret=self.config.secret)
         return token_secret if compare_digest(existing_hash, expected_hash) else None
 
-    def _csrf_tokens_match(self, request_csrf_token: str | None, cookie_csrf_token: str | None) -> bool:
+    def _csrf_tokens_match(self, request_csrf_token: str, cookie_csrf_token: str) -> bool:
         """Take the CSRF tokens from the request and the cookie and verify both are valid and identical."""
-        if not (request_csrf_token and cookie_csrf_token):
-            return False
-
         decoded_request_token = self._decode_csrf_token(request_csrf_token)
         decoded_cookie_token = self._decode_csrf_token(cookie_csrf_token)
         if decoded_request_token is None or decoded_cookie_token is None:

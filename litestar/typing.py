@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from collections import abc, deque
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, is_dataclass, replace
 from inspect import Parameter, Signature
-from typing import Any, AnyStr, Callable, Collection, ForwardRef, Literal, Mapping, Sequence, TypeVar, cast
+from typing import Any, AnyStr, Callable, Collection, ForwardRef, Literal, Mapping, Protocol, Sequence, TypeVar, cast
 
 from msgspec import UnsetType
-from typing_extensions import Annotated, NotRequired, Required, Self, get_args, get_origin
+from typing_extensions import NotRequired, Required, Self, get_args, get_origin, get_type_hints, is_typeddict
 
 from litestar.exceptions import ImproperlyConfiguredException
 from litestar.openapi.spec import Example
@@ -21,23 +21,32 @@ from litestar.utils.predicates import (
     is_generic,
     is_non_string_iterable,
     is_non_string_sequence,
-    is_pydantic_constrained_field,
+    is_union,
 )
 from litestar.utils.typing import (
     get_instantiable_origin,
     get_safe_generic_origin,
+    get_type_hints_with_generics_resolved,
     make_non_optional_union,
     unwrap_annotation,
 )
 
-try:
-    from pydantic.fields import FieldInfo
-except ImportError:
-    FieldInfo = Empty  # type: ignore
-
 __all__ = ("FieldDefinition",)
 
 T = TypeVar("T", bound=KwargDefinition)
+
+
+class _KwargMetaExtractor(Protocol):
+    @staticmethod
+    def matches(annotation: Any, name: str | None, default: Any) -> bool:
+        ...
+
+    @staticmethod
+    def extract(annotation: Any, default: Any) -> Any:
+        ...
+
+
+_KWARG_META_EXTRACTORS: set[_KwargMetaExtractor] = set()
 
 
 def _unpack_predicate(value: Any) -> dict[str, Any]:
@@ -117,7 +126,7 @@ def _traverse_metadata(
 
     Args:
         metadata: A list of metadata values from annotation, namely anything stored under Annotated[x, metadata...]
-        is_sequence_container: Whether or not the container is a sequence container (list, tuple etc...)
+        is_sequence_container: Whether the container is a sequence container (list, tuple etc...)
         extra: Extra key values to parse.
 
     Returns:
@@ -225,14 +234,16 @@ class FieldDefinition:
     def _extract_metadata(
         cls, annotation: Any, name: str | None, default: Any, metadata: tuple[Any, ...], extra: dict[str, Any] | None
     ) -> tuple[KwargDefinition | None, dict[str, Any]]:
-        from litestar.dto.base_dto import AbstractDTO
-
         model = BodyKwarg if name == "data" else ParameterKwarg
-        if isinstance(default, FieldInfo):
-            return _create_metadata_from_type(metadata=[default], model=model, annotation=annotation, extra=extra)
 
-        if is_pydantic_constrained_field(annotation) or isinstance(annotation, AbstractDTO):
-            return _create_metadata_from_type(metadata=[annotation], model=model, annotation=annotation, extra=extra)
+        for extractor in _KWARG_META_EXTRACTORS:
+            if extractor.matches(annotation=annotation, name=name, default=default):
+                return _create_metadata_from_type(
+                    extractor.extract(annotation=annotation, default=default),
+                    model=model,
+                    annotation=annotation,
+                    extra=extra,
+                )
 
         if any(isinstance(arg, KwargDefinition) for arg in get_args(annotation)):
             return next(arg for arg in get_args(annotation) if isinstance(arg, KwargDefinition)), extra or {}
@@ -321,12 +332,12 @@ class FieldDefinition:
     @property
     def is_annotated(self) -> bool:
         """Check if the field type is Annotated."""
-        return Annotated in self.type_wrappers  # type: ignore[comparison-overlap]
+        return bool(self.metadata)
 
     @property
     def is_literal(self) -> bool:
         """Check if the field type is Literal."""
-        return get_origin(self.annotation) is Literal
+        return self.origin is Literal
 
     @property
     def is_forward_ref(self) -> bool:
@@ -359,6 +370,11 @@ class FieldDefinition:
         return bool(self.is_union and NoneType in self.args)
 
     @property
+    def is_none_type(self) -> bool:
+        """Whether the annotation is NoneType or not."""
+        return self.annotation is NoneType
+
+    @property
     def is_collection(self) -> bool:
         """Whether the annotation is a collection type or not."""
         return self.is_subclass_of(Collection)
@@ -372,8 +388,8 @@ class FieldDefinition:
     def bound_types(self) -> tuple[FieldDefinition, ...] | None:
         """A tuple of bound types - if the annotation is a TypeVar with bound types, otherwise None."""
         if self.is_type_var and (bound := getattr(self.annotation, "__bound__", None)):
-            if is_non_string_sequence(bound):
-                return tuple(FieldDefinition.from_annotation(t) for t in bound)
+            if is_union(bound):
+                return tuple(FieldDefinition.from_annotation(t) for t in get_args(bound))
             return (FieldDefinition.from_annotation(bound),)
         return None
 
@@ -391,6 +407,24 @@ class FieldDefinition:
                 else:
                     args.append(field_definition)
         return tuple(args)
+
+    @property
+    def is_dataclass_type(self) -> bool:
+        """Whether the annotation is a dataclass type or not."""
+
+        return is_dataclass(cast("type", self.origin or self.annotation))
+
+    @property
+    def is_typeddict_type(self) -> bool:
+        """Whether the type is TypedDict or not."""
+
+        return is_typeddict(self.origin or self.annotation)
+
+    @property
+    def type_(self) -> Any:
+        """The type of the annotation with all the wrappers removed, including the generic types."""
+
+        return self.origin or self.annotation
 
     def is_subclass_of(self, cl: type[Any] | tuple[type[Any], ...]) -> bool:
         """Whether the annotation is a subclass of the given type.
@@ -426,6 +460,24 @@ class FieldDefinition:
         """
         return any(t.is_subclass_of(cl) for t in self.inner_types)
 
+    def get_type_hints(self, *, include_extras: bool = False, resolve_generics: bool = False) -> dict[str, Any]:
+        """Get the type hints for the annotation.
+
+        Args:
+            include_extras: Flag to indicate whether to include ``Annotated[T, ...]`` or not.
+            resolve_generics: Flag to indicate whether to resolve the generic types in the type hints or not.
+
+        Returns:
+            The type hints.
+        """
+
+        if self.origin is not None or self.is_generic:
+            if resolve_generics:
+                return get_type_hints_with_generics_resolved(self.annotation, include_extras=include_extras)
+            return get_type_hints(self.origin or self.annotation, include_extras=include_extras)
+
+        return get_type_hints(self.annotation, include_extras=include_extras)
+
     @classmethod
     def from_annotation(cls, annotation: Any, **kwargs: Any) -> FieldDefinition:
         """Initialize FieldDefinition.
@@ -449,8 +501,11 @@ class FieldDefinition:
             if isinstance(kwargs.get("default"), (KwargDefinition, DependencyKwarg)):
                 kwargs["kwarg_definition"] = kwargs.pop("default")
             elif any(isinstance(v, (KwargDefinition, DependencyKwarg)) for v in metadata):
-                kwargs["kwarg_definition"] = next(
-                    v for v in metadata if isinstance(v, (KwargDefinition, DependencyKwarg))
+                kwargs["kwarg_definition"] = next(  # pragma: no cover
+                    # see https://github.com/nedbat/coveragepy/issues/475
+                    v
+                    for v in metadata
+                    if isinstance(v, (KwargDefinition, DependencyKwarg))
                 )
                 metadata = tuple(v for v in metadata if not isinstance(v, (KwargDefinition, DependencyKwarg)))
             elif (extra := kwargs.get("extra", {})) and "kwarg_definition" in extra:
@@ -461,7 +516,7 @@ class FieldDefinition:
                     name=kwargs.get("name", ""),
                     default=kwargs.get("default", Empty),
                     metadata=metadata,
-                    extra=kwargs.get("extra", {}),
+                    extra=kwargs.get("extra"),
                 )
 
         kwargs.setdefault("annotation", unwrapped)
@@ -511,13 +566,13 @@ class FieldDefinition:
         return cls.from_annotation(
             annotation,
             name=name,
+            default=default,
             **{
                 k: v
                 for k, v in {
                     "inner_types": inner_types,
                     "kwarg_definition": kwarg_definition,
                     "extra": extra,
-                    "default": default,
                 }.items()
                 if v is not None
             },

@@ -95,3 +95,54 @@ import pytest
 def test_repository_deprecations(import_path: str, import_name: str) -> None:
     module = importlib.import_module(import_path)
     assert getattr(module, import_name)
+
+
+def test_litestar_type_deprecation() -> None:
+    with pytest.warns(DeprecationWarning):
+        from litestar.types.internal_types import LitestarType  # noqa: F401
+
+
+def test_contrib_minijnja_deprecation() -> None:
+    with pytest.warns(DeprecationWarning):
+        from litestar.contrib.minijnja import MiniJinjaTemplateEngine  # noqa: F401
+
+
+def test_litestar_templates_template_context_deprecation() -> None:
+    with pytest.warns(DeprecationWarning):
+        from litestar.template.base import TemplateContext  # noqa: F401
+
+
+def test_minijinja_from_state_deprecation() -> None:
+    with pytest.warns(DeprecationWarning):
+        from litestar.contrib.minijinja import minijinja_from_state  # noqa: F401
+
+
+def test_constants_deprecations() -> None:
+    with pytest.warns(DeprecationWarning):
+        from litestar.constants import SCOPE_STATE_NAMESPACE  # noqa: F401
+
+
+def test_utils_deprecations() -> None:
+    with pytest.warns(DeprecationWarning):
+        from litestar.utils import (  # noqa: F401
+            delete_litestar_scope_state,
+            get_litestar_scope_state,
+            set_litestar_scope_state,
+        )
+
+
+def test_utils_scope_deprecations() -> None:
+    with pytest.warns(DeprecationWarning):
+        from litestar.utils.scope import (  # noqa: F401
+            delete_litestar_scope_state,
+            get_litestar_scope_state,
+            set_litestar_scope_state,
+        )
+
+
+def test_is_sync_or_async_generator_deprecation() -> None:
+    with pytest.warns(DeprecationWarning):
+        from litestar.utils.predicates import is_sync_or_async_generator  # noqa: F401
+
+    with pytest.warns(DeprecationWarning):
+        from litestar.utils import is_sync_or_async_generator as _  # noqa: F401

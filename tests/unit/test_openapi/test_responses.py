@@ -1,22 +1,23 @@
+# ruff: noqa: UP006
+from __future__ import annotations
+
 from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable, Dict, Type, TypedDict
+from typing import Any, Callable, Dict, TypedDict
 from unittest.mock import MagicMock
 
 import pytest
-from pydantic import BaseModel
+from typing_extensions import TypeAlias
 
 from litestar import Controller, Litestar, MediaType, Response, get, post
+from litestar._openapi.datastructures import OpenAPIContext
 from litestar._openapi.responses import (
-    create_additional_responses,
+    ResponseFactory,
     create_error_responses,
-    create_responses,
-    create_success_response,
 )
-from litestar._openapi.schema_generation import SchemaCreator
-from litestar.contrib.pydantic import PydanticSchemaPlugin
+from litestar._openapi.schema_generation.plugins import openapi_schema_plugins
 from litestar.datastructures import Cookie, ResponseHeader
 from litestar.dto import AbstractDTO
 from litestar.exceptions import (
@@ -25,6 +26,7 @@ from litestar.exceptions import (
     ValidationException,
 )
 from litestar.handlers import HTTPRouteHandler
+from litestar.openapi.config import OpenAPIConfig
 from litestar.openapi.datastructures import ResponseSpec
 from litestar.openapi.spec import OpenAPIHeader, OpenAPIMediaType, Reference, Schema
 from litestar.openapi.spec.enums import OpenAPIType
@@ -38,24 +40,39 @@ from litestar.status_codes import (
     HTTP_406_NOT_ACCEPTABLE,
 )
 from litestar.typing import FieldDefinition
-from tests import PydanticPerson, PydanticPersonFactory
+from tests.models import DataclassPerson, DataclassPersonFactory
+from tests.unit.test_openapi.utils import PetException
 
-from .utils import PetException
+CreateFactoryFixture: TypeAlias = "Callable[..., ResponseFactory]"
 
 
-def get_registered_route_handler(handler: "HTTPRouteHandler | type[Controller]", name: str) -> HTTPRouteHandler:
+@pytest.fixture()
+def create_factory() -> CreateFactoryFixture:
+    def _create_factory(route_handler: HTTPRouteHandler, generate_examples: bool = False) -> ResponseFactory:
+        return ResponseFactory(
+            context=OpenAPIContext(
+                openapi_config=OpenAPIConfig(title="test", version="1.0.0", create_examples=generate_examples),
+                plugins=openapi_schema_plugins,
+            ),
+            route_handler=route_handler,
+        )
+
+    return _create_factory
+
+
+def get_registered_route_handler(handler: HTTPRouteHandler | type[Controller], name: str) -> HTTPRouteHandler:
     app = Litestar(route_handlers=[handler])
     return app.asgi_router.route_handler_index[name]  # type: ignore[return-value]
 
 
-def test_create_responses(person_controller: Type[Controller], pet_controller: Type[Controller]) -> None:
+def test_create_responses(
+    person_controller: type[Controller], pet_controller: type[Controller], create_factory: CreateFactoryFixture
+) -> None:
     for route in Litestar(route_handlers=[person_controller]).routes:
         assert isinstance(route, HTTPRoute)
         for route_handler, _ in route.route_handler_map.values():
             if route_handler.resolve_include_in_schema():
-                responses = create_responses(
-                    route_handler, raises_validation_error=True, schema_creator=SchemaCreator(generate_examples=True)
-                )
+                responses = create_factory(route_handler).create_responses(True)
                 assert responses
                 assert str(route_handler.status_code) in responses
                 assert str(HTTP_400_BAD_REQUEST) in responses
@@ -64,11 +81,7 @@ def test_create_responses(person_controller: Type[Controller], pet_controller: T
         pet_controller,
         "tests.unit.test_openapi.conftest.create_pet_controller.<locals>.PetController.get_pets_or_owners",
     )
-    responses = create_responses(
-        handler,
-        raises_validation_error=False,
-        schema_creator=SchemaCreator(generate_examples=True, plugins=[PydanticSchemaPlugin()]),
-    )
+    responses = create_factory(handler).create_responses(raises_validation_error=False)
     assert responses
     assert str(HTTP_400_BAD_REQUEST) not in responses
     assert str(HTTP_406_NOT_ACCEPTABLE) in responses
@@ -79,17 +92,15 @@ def test_create_error_responses() -> None:
     class AlternativePetException(HTTPException):
         status_code = ValidationException.status_code
 
-    pet_exc_response, permission_denied_exc_response, validation_exc_response = tuple(
-        create_error_responses(
-            exceptions=[
-                PetException,
-                PermissionDeniedException,
-                AlternativePetException,
-                ValidationException,
-            ]
-        )
+    pet_exc_response, permission_denied_exc_response, validation_exc_response = create_error_responses(
+        exceptions=[
+            PetException,
+            PermissionDeniedException,
+            AlternativePetException,
+            ValidationException,
+        ]
     )
-    assert pet_exc_response
+
     assert pet_exc_response[0] == str(PetException.status_code)
     assert pet_exc_response[1].description == HTTPStatus(PetException.status_code).description
     assert pet_exc_response[1].content
@@ -119,10 +130,8 @@ def test_create_error_responses() -> None:
     assert schema.type
     assert not schema.one_of
 
-    assert validation_exc_response
     assert validation_exc_response[0] == str(ValidationException.status_code)
     assert validation_exc_response[1].description == HTTPStatus(ValidationException.status_code).description
-
     assert validation_exc_response[1].content
     assert validation_exc_response[1].content[MediaType.JSON]
 
@@ -145,16 +154,13 @@ def test_create_error_responses_with_non_http_status_code() -> None:
         status_code: int = 420
         detail: str = "House not found."
 
-    house_not_found_exc_response, _ = tuple(
-        create_error_responses(exceptions=[HouseNotFoundError, ValidationException])
-    )
+    house_not_found_exc_response = next(create_error_responses(exceptions=[HouseNotFoundError]))
 
-    assert house_not_found_exc_response
     assert house_not_found_exc_response[0] == str(HouseNotFoundError.status_code)
     assert house_not_found_exc_response[1].description == HouseNotFoundError.detail
 
 
-def test_create_success_response_with_headers() -> None:
+def test_create_success_response_with_headers(create_factory: CreateFactoryFixture) -> None:
     @get(
         path="/test",
         response_headers=[ResponseHeader(name="special-header", value="100", description="super-duper special")],
@@ -167,7 +173,7 @@ def test_create_success_response_with_headers() -> None:
         return []
 
     handler = get_registered_route_handler(handler, "test")
-    response = create_success_response(handler, SchemaCreator(generate_examples=True))
+    response = create_factory(handler, True).create_success_response()
     assert response.description == "test"
 
     assert response.content
@@ -185,7 +191,7 @@ def test_create_success_response_with_headers() -> None:
     assert headers_schema.type == OpenAPIType.STRING
 
 
-def test_create_success_response_with_cookies() -> None:
+def test_create_success_response_with_cookies(create_factory: CreateFactoryFixture) -> None:
     @get(
         path="/test",
         response_cookies=[
@@ -198,7 +204,7 @@ def test_create_success_response_with_cookies() -> None:
         return []
 
     handler = get_registered_route_handler(handler, "test")
-    response = create_success_response(handler, SchemaCreator(generate_examples=True))
+    response = create_factory(handler, True).create_success_response()
 
     assert isinstance(response.headers, dict)
     assert isinstance(response.headers["Set-Cookie"], OpenAPIHeader)
@@ -218,44 +224,39 @@ def test_create_success_response_with_cookies() -> None:
     }
 
 
-def test_create_success_response_with_response_class() -> None:
+def test_create_success_response_with_response_class(create_factory: CreateFactoryFixture) -> None:
     @get(path="/test", name="test")
-    def handler() -> Response[PydanticPerson]:
-        return Response(content=PydanticPersonFactory.build())
+    def handler() -> Response[DataclassPerson]:
+        return Response(content=DataclassPersonFactory.build())
 
     handler = get_registered_route_handler(handler, "test")
-    schemas: Dict[str, Schema] = {}
-    response = create_success_response(
-        handler, SchemaCreator(generate_examples=True, schemas=schemas, plugins=[PydanticSchemaPlugin()])
-    )
+    factory = create_factory(handler, True)
+    response = factory.create_success_response()
 
     assert response.content
     reference = response.content["application/json"].schema
 
     assert isinstance(reference, Reference)
-    key = reference.ref.split("/")[-1]
-    assert isinstance(schemas[key], Schema)
-    assert key == PydanticPerson.__name__
+    assert isinstance(factory.context.schema_registry.from_reference(reference).schema, Schema)
 
 
-def test_create_success_response_with_stream() -> None:
+def test_create_success_response_with_stream(create_factory: CreateFactoryFixture) -> None:
     @get(path="/test", name="test")
     def handler() -> Stream:
         return Stream(iter([]))
 
     handler = get_registered_route_handler(handler, "test")
-    response = create_success_response(handler, SchemaCreator(generate_examples=True))
+    response = create_factory(handler, True).create_success_response()
     assert response.description == "Stream Response"
 
 
-def test_create_success_response_redirect() -> None:
+def test_create_success_response_redirect(create_factory: CreateFactoryFixture) -> None:
     @get(path="/test", name="test")
     def redirect_handler() -> Redirect:
         return Redirect(path="/target")
 
     handler = get_registered_route_handler(redirect_handler, "test")
-
-    response = create_success_response(handler, SchemaCreator(generate_examples=True))
+    response = create_factory(handler, True).create_success_response()
     assert response.description == "Redirect Response"
     assert response.headers
     location = response.headers["location"]
@@ -265,14 +266,13 @@ def test_create_success_response_redirect() -> None:
     assert location.description
 
 
-def test_create_success_response_redirect_override() -> None:
+def test_create_success_response_redirect_override(create_factory: CreateFactoryFixture) -> None:
     @get(path="/test", status_code=HTTP_307_TEMPORARY_REDIRECT, name="test")
     def redirect_handler() -> Redirect:
         return Redirect(path="/target")
 
     handler = get_registered_route_handler(redirect_handler, "test")
-
-    response = create_success_response(handler, SchemaCreator(generate_examples=True))
+    response = create_factory(handler, True).create_success_response()
     assert response.description == "Redirect Response"
     assert response.headers
     location = response.headers["location"]
@@ -282,14 +282,14 @@ def test_create_success_response_redirect_override() -> None:
     assert location.description
 
 
-def test_create_success_response_file_data() -> None:
+def test_create_success_response_file_data(create_factory: CreateFactoryFixture) -> None:
     @get(path="/test", name="test")
     def file_handler() -> File:
         return File(path=Path("test_responses.py"))
 
     handler = get_registered_route_handler(file_handler, "test")
+    response = create_factory(handler, True).create_success_response()
 
-    response = create_success_response(handler, SchemaCreator(generate_examples=True))
     assert response.description == "File Download"
     assert response.headers
 
@@ -309,25 +309,24 @@ def test_create_success_response_file_data() -> None:
     assert response.headers["etag"].description
 
 
-def test_create_success_response_template() -> None:
+def test_create_success_response_template(create_factory: CreateFactoryFixture) -> None:
     @get(path="/template", name="test")
     def template_handler() -> Template:
         return Template(template_name="none")
 
     handler = get_registered_route_handler(template_handler, "test")
-
-    response = create_success_response(handler, SchemaCreator(generate_examples=True))
+    response = create_factory(handler, True).create_success_response()
     assert response.description == "Request fulfilled, document follows"
     assert response.content
     assert response.content[MediaType.HTML.value]
 
 
-def test_create_additional_responses() -> None:
+def test_create_additional_responses(create_factory: CreateFactoryFixture) -> None:
     @dataclass
     class ServerError:
         message: str
 
-    class AuthenticationError(BaseModel):
+    class AuthenticationError(TypedDict):
         message: str
 
     class UnknownError(TypedDict):
@@ -340,11 +339,11 @@ def test_create_additional_responses() -> None:
             505: ResponseSpec(data_container=UnknownError),
         }
     )
-    def handler() -> PydanticPerson:
-        return PydanticPersonFactory.build()
+    def handler() -> DataclassPerson:
+        return DataclassPersonFactory.build()
 
-    schemas: Dict[str, Schema] = {}
-    responses = create_additional_responses(handler, SchemaCreator(schemas=schemas, plugins=[PydanticSchemaPlugin()]))
+    factory = create_factory(handler)
+    responses = factory.create_additional_responses()
 
     first_response = next(responses)
     assert first_response[0] == "401"
@@ -354,7 +353,7 @@ def test_create_additional_responses() -> None:
     assert isinstance(first_response[1].content["application/json"], OpenAPIMediaType)
     reference = first_response[1].content["application/json"].schema
     assert isinstance(reference, Reference)
-    schema = schemas[reference.ref.split("/")[-1]]
+    schema = factory.context.schema_registry.from_reference(reference).schema
     assert isinstance(schema, Schema)
     assert schema.title == "AuthenticationError"
 
@@ -366,7 +365,7 @@ def test_create_additional_responses() -> None:
     assert isinstance(second_response[1].content["text/plain"], OpenAPIMediaType)
     reference = second_response[1].content["text/plain"].schema
     assert isinstance(reference, Reference)
-    schema = schemas[reference.ref.split("/")[-1]]
+    schema = factory.context.schema_registry.from_reference(reference).schema
     assert isinstance(schema, Schema)
     assert schema.title == "ServerError"
     assert not schema.examples
@@ -379,26 +378,26 @@ def test_create_additional_responses() -> None:
         next(responses)
 
 
-def test_additional_responses_overlap_with_other_responses() -> None:
-    class OkResponse(BaseModel):
+def test_additional_responses_overlap_with_other_responses(create_factory: CreateFactoryFixture) -> None:
+    @dataclass
+    class OkResponse:
         message: str
 
     @get(responses={200: ResponseSpec(data_container=OkResponse, description="Overwritten response")}, name="test")
-    def handler() -> PydanticPerson:
-        return PydanticPersonFactory.build()
+    def handler() -> DataclassPerson:
+        return DataclassPersonFactory.build()
 
     handler = get_registered_route_handler(handler, "test")
-    responses = create_responses(
-        handler, raises_validation_error=True, schema_creator=SchemaCreator(generate_examples=False)
-    )
+    responses = create_factory(handler).create_responses(True)
 
     assert responses is not None
     assert responses["200"] is not None
     assert responses["200"].description == "Overwritten response"
 
 
-def test_additional_responses_overlap_with_raises() -> None:
-    class ErrorResponse(BaseModel):
+def test_additional_responses_overlap_with_raises(create_factory: CreateFactoryFixture) -> None:
+    @dataclass
+    class ErrorResponse:
         message: str
 
     @get(
@@ -406,43 +405,40 @@ def test_additional_responses_overlap_with_raises() -> None:
         responses={400: ResponseSpec(data_container=ErrorResponse, description="Overwritten response")},
         name="test",
     )
-    def handler() -> PydanticPerson:
+    def handler() -> DataclassPerson:
         raise ValidationException()
 
     handler = get_registered_route_handler(handler, "test")
-
-    responses = create_responses(
-        handler, raises_validation_error=True, schema_creator=SchemaCreator(generate_examples=False)
-    )
+    responses = create_factory(handler).create_responses(True)
 
     assert responses is not None
     assert responses["400"] is not None
     assert responses["400"].description == "Overwritten response"
 
 
-def test_create_response_for_response_subclass() -> None:
+def test_create_response_for_response_subclass(create_factory: CreateFactoryFixture) -> None:
     class CustomResponse(Response[T]):
         pass
 
-    @get(path="/test", name="test")
-    def handler() -> CustomResponse[PydanticPerson]:
-        return CustomResponse(content=PydanticPersonFactory.build())
+    @get(path="/test", name="test", signature_types=[CustomResponse])
+    def handler() -> CustomResponse[DataclassPerson]:
+        return CustomResponse(content=DataclassPersonFactory.build())
 
     handler = get_registered_route_handler(handler, "test")
+    factory = create_factory(handler, True)
+    response = factory.create_success_response()
 
-    schemas: Dict[str, Schema] = {}
-    response = create_success_response(
-        handler, SchemaCreator(generate_examples=True, schemas=schemas, plugins=[PydanticSchemaPlugin()])
-    )
     assert response.content
     assert isinstance(response.content["application/json"], OpenAPIMediaType)
     reference = response.content["application/json"].schema
     assert isinstance(reference, Reference)
-    schema = schemas[reference.value]
-    assert schema.title == "PydanticPerson"
+    schema = factory.context.schema_registry.from_reference(reference).schema
+    assert schema.title == "DataclassPerson"
 
 
-def test_success_response_with_future_annotations(create_module: Callable[[str], ModuleType]) -> None:
+def test_success_response_with_future_annotations(
+    create_module: Callable[[str], ModuleType], create_factory: CreateFactoryFixture
+) -> None:
     module = create_module(
         """
 from __future__ import annotations
@@ -454,35 +450,35 @@ def handler() -> int:
 """
     )
     handler = get_registered_route_handler(module.handler, "test")
-    response = create_success_response(handler, SchemaCreator(generate_examples=True))
+    response = create_factory(handler, True).create_success_response()
     assert next(iter(response.content.values())).schema.type == OpenAPIType.INTEGER  # type: ignore[union-attr]
 
 
-def test_response_generation_with_dto() -> None:
+def test_response_generation_with_dto(create_factory: CreateFactoryFixture) -> None:
     mock_dto = MagicMock(spec=AbstractDTO)
     mock_dto.create_openapi_schema.return_value = Schema()
 
-    @post(path="/form-upload", return_dto=mock_dto)
+    @post(path="/form-upload", return_dto=mock_dto)  # pyright: ignore
     async def handler(data: Dict[str, Any]) -> Dict[str, Any]:
         return data
 
     Litestar(route_handlers=[handler])
 
+    factory = create_factory(handler)
     field_definition = FieldDefinition.from_annotation(Dict[str, Any])
-    schema_creator = SchemaCreator()
-    create_success_response(handler, schema_creator)
+    factory.create_success_response()
     mock_dto.create_openapi_schema.assert_called_once_with(
-        field_definition=field_definition, handler_id=handler.handler_id, schema_creator=schema_creator
+        field_definition=field_definition, handler_id=handler.handler_id, schema_creator=factory.schema_creator
     )
 
 
 @pytest.mark.parametrize(
     "content_media_type, expected", ((MediaType.TEXT, MediaType.TEXT), (None, "application/octet-stream"))
 )
-def test_file_response_media_type(content_media_type: Any, expected: Any) -> None:
+def test_file_response_media_type(content_media_type: Any, expected: Any, create_factory: CreateFactoryFixture) -> None:
     @get("/", content_media_type=content_media_type)
     def handler() -> File:
         return File("test.txt")
 
-    openapi_response = create_success_response(handler, SchemaCreator())
-    assert next(iter(openapi_response.content.values())).schema.content_media_type == expected  # type: ignore
+    response = create_factory(handler).create_success_response()
+    assert next(iter(response.content.values())).schema.content_media_type == expected  # type: ignore

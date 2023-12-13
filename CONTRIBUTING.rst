@@ -1,13 +1,21 @@
-Contribution guide
+Contribution Guide
 ==================
 
 Setting up the environment
 --------------------------
 
+.. tip:: Supported Python versions.
+
+   The lowest currently supported version is Python 3.8. You can use `pyenv <https://github.com/pyenv/pyenv>`_ to manage
+   multiple Python versions on your system.
+
+   We also use the lowest supported version in our type-checking CI,
+   this ensures that the changes you made are backward compatible.
+
 .. tip:: We maintain a Makefile with several commands to help with common tasks.
    You can run ``make help`` to see a list of available commands.
 
-1. Install `Personal Doomsday Machine <https://pdm.fming.dev/latest/>`_
+1. Install `PDM <https://pdm.fming.dev/latest/>`_
 2. Run ``pdm install`` or ``make install`` to create a
    `virtual environment <https://docs.python.org/3/tutorial/venv.html>`_ and install the required development dependencies
 3. If you're working on the documentation and need to build it locally, install the extra dependencies
@@ -18,9 +26,8 @@ Setting up the environment
 .. tip:: Many modern IDEs like PyCharm or VS Code will enable the PDM-managed virtualenv that is created in step 2 for you automatically.
    If your IDE / editor does not offer this functionality, then you will need to manually activate the virtualenv yourself. Otherwise you may encounter errors or unexpected behaviour when trying to run the commands referenced within this document.
 
-   The easiest way to activate this virtualenv manually is by running ``pdm shell``, as described at
-   `Working with virtual environments <https://pdm.fming.dev/latest/usage/venv/#working-with-virtual-environments>`_
-   in PDM's documentation.
+   To activate the virtualenv manually, please consult PDM's documentation on
+   `working with virtual environments <https://pdm.fming.dev/latest/usage/venv/#working-with-virtual-environments>`_. A simpler alternative is using the PDM plugin `pdm-shell <https://github.com/abersheeran/pdm-shell>`_.
 
    The rest of this document will assume this environment is active wherever commands are referenced.
 
@@ -49,7 +56,7 @@ Guidelines for writing code
 
 - Code should be `Pythonic and zen <https://peps.python.org/pep-0020/>`_
 - All code should be fully `typed <https://peps.python.org/pep-0484/>`_. This is enforced via
-  `mypy <https://mypy.readthedocs.io/en/stable/>`_ and `pyright <https://github.com/microsoft/pyright>`_
+  `mypy <https://mypy.readthedocs.io/en/stable/>`_ and `pyright <https://github.com/microsoft/pyright/>`_
 
   * When requiring complex types, use a `type alias <https://docs.python.org/3/library/typing.html#type-aliases>`_.
     Check ``litestar/types`` if a type alias for your use case already exists
@@ -92,6 +99,18 @@ or ``make coverage``. Due to the nature of pytest-xdist, attaching a debugger is
 straightforward. For debugging, it's recommended to run the tests individually with
 ``pytest <test name>`` or via an IDE, which will skip pytest-xdist.
 
+Running type checkers
++++++++++++++++++++++
+
+We use `mypy <https://mypy.readthedocs.io/en/stable/>`_ and `pyright <https://github.com/microsoft/pyright/>`_ to
+enforce type safety. You can run them with:
+
+- ``make mypy``
+- ``make pyright``
+- ``make type-check`` to run both
+- ``make lint`` to run pre-commit hooks and type checkers.
+
+Our type checkers are run on Python 3.8 in CI, so you should make sure to run them on the same version locally as well.
 
 Project documentation
 ---------------------

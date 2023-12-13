@@ -97,14 +97,15 @@ Additionally, you can specify the following special kwargs, what's called "reser
 
 
 * ``cookies``: injects the request :class:`cookies <.datastructures.cookie.Cookie>` as a parsed dictionary.
-* ``headers``: injects the request headers as an instance of :class:`Headers <.datastructures.headers.Headers>` ,
-  which is a case-insensitive mapping.
+* ``headers``: injects the request headers as a parsed dictionary.
 * ``query`` : injects the request ``query_params`` as a parsed dictionary.
 * ``request``: injects the :class:`Request <.connection.Request>` instance. Available only for `http route handlers`_
 * ``scope`` : injects the ASGI scope dictionary.
 * ``socket``: injects the :class:`WebSocket <.connection.WebSocket>` instance. Available only for `websocket route handlers`_
 * ``state`` : injects a copy of the application :class:`State <.datastructures.state.State>`.
 * ``body`` : the raw request body. Available only for `http route handlers`_
+
+Note that if your parameters collide with any of the reserved keyword arguments above, you can :ref:`provide an alternative name <usage/routing/parameters:Alternative names and constraints>`.
 
 For example:
 
@@ -119,7 +120,7 @@ For example:
    async def my_request_handler(
        state: State,
        request: Request,
-       headers: Headers,
+       headers: Dict[str, str],
        query: Dict[str, Any],
        cookies: Dict[str, Any],
    ) -> None:
@@ -571,7 +572,7 @@ the module scope at runtime. We can address this on a case-by-case basis by sile
     # Choose the appropriate noqa directive according to your linter
     from domain import Model  # noqa: TCH002
 
-However, this approach can get tedious, so as an alternative, Litestar accepts a ``signature_namespace`` mapping at
+However, this approach can get tedious, so as an alternative, Litestar accepts a ``signature_types`` sequence at
 every :ref:`layer <layered-architecture>` of the application. The following is a demonstration of how to use this
 pattern.
 
@@ -591,6 +592,13 @@ should reference our domain ``Model`` type.
 
 .. literalinclude:: /examples/signature_namespace/app.py
     :language: python
+
+.. tip::
+
+    If you want to map your type to a name that is different from its ``__name__`` attribute, you can use the
+    ``signature_namespace`` parameter, e.g. ``app = Litestar(signature_namespace={"FooModel": Model})``.
+
+    This enables import patterns like ``from domain.foo import Model as FooModel`` inside ``if TYPE_CHECKING`` blocks.
 
 Default signature namespace
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~

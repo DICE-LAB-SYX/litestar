@@ -1,22 +1,23 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+import json
+from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlencode
 
 from httpx._content import encode_json as httpx_encode_json
 from httpx._content import encode_multipart_data, encode_urlencoded_data
-from msgspec import Struct, to_builtins
 
 from litestar import delete, patch, post, put
 from litestar.app import Litestar
 from litestar.connection import Request
 from litestar.enums import HttpMethod, ParamType, RequestEncodingType, ScopeType
 from litestar.handlers.http_handlers import get
-from litestar.serialization import decode_json, encode_json
+from litestar.serialization import decode_json, default_serializer, encode_json
 from litestar.types import DataContainerType, HTTPScope, RouteHandlerType
 from litestar.types.asgi_types import ASGIVersion
-from litestar.utils import is_attrs_class, is_dataclass_instance, is_pydantic_model_instance
+from litestar.utils import get_serializer_from_scope
+from litestar.utils.scope.state import ScopeState
 
 if TYPE_CHECKING:
     from httpx._types import FileTypes
@@ -33,13 +34,17 @@ _decorator_http_method_map: dict[HttpMethod, type[HTTPRouteHandler]] = {
 }
 
 
-def _create_default_route_handler(http_method: HttpMethod, handler_kwargs: dict[str, Any] | None) -> HTTPRouteHandler:
+def _create_default_route_handler(
+    http_method: HttpMethod, handler_kwargs: dict[str, Any] | None, app: Litestar
+) -> HTTPRouteHandler:
     handler_decorator = _decorator_http_method_map[http_method]
 
     def _default_route_handler() -> None:
         ...
 
-    return handler_decorator("/", sync_to_thread=False, **(handler_kwargs or {}))(_default_route_handler)
+    handler = handler_decorator("/", sync_to_thread=False, **(handler_kwargs or {}))(_default_route_handler)
+    handler.owner = app
+    return handler
 
 
 def _create_default_app() -> Litestar:
@@ -56,6 +61,7 @@ class RequestFactory:
         "root_path",
         "scheme",
         "handler_kwargs",
+        "serializer",
     )
 
     def __init__(
@@ -78,7 +84,7 @@ class RequestFactory:
              handler_kwargs: Kwargs to pass to the route handler created for the request
 
         Examples:
-            .. code-block: python
+            .. code-block:: python
 
                 from litestar import Litestar
                 from litestar.enums import RequestEncodingType
@@ -120,6 +126,7 @@ class RequestFactory:
         self.root_path = root_path
         self.scheme = scheme
         self.handler_kwargs = handler_kwargs
+        self.serializer = partial(default_serializer, type_encoders=self.app.type_encoders)
 
     def _create_scope(
         self,
@@ -179,7 +186,8 @@ class RequestFactory:
             asgi=ASGIVersion(spec_version="3.0", version="3.0"),
             http_version=http_version or "1.1",
             raw_path=path.encode("ascii"),
-            route_handler=route_handler or _create_default_route_handler(http_method, self.handler_kwargs),
+            route_handler=route_handler
+            or _create_default_route_handler(http_method, self.handler_kwargs, app=self.app),
             extensions={},
         )
 
@@ -278,33 +286,22 @@ class RequestFactory:
         )
 
         headers = headers or {}
+        body = b""
         if data:
-            if isinstance(data, Struct):
-                data = to_builtins(data)
-            elif is_dataclass_instance(data):
-                data = asdict(data)
-            elif is_attrs_class(type(data)):
-                from attr import asdict as attrs_as_dict
-
-                data = attrs_as_dict(data)  # type: ignore[arg-type]
-            elif is_pydantic_model_instance(data):
-                from litestar.contrib.pydantic import _model_dump
-
-                data = _model_dump(data)
+            data = json.loads(encode_json(data, serializer=get_serializer_from_scope(scope)))
 
             if request_media_type == RequestEncodingType.JSON:
                 encoding_headers, stream = httpx_encode_json(data)
             elif request_media_type == RequestEncodingType.MULTI_PART:
-                encoding_headers, stream = encode_multipart_data(cast("dict[str, Any]", data), files=files or [], boundary=None)  # type: ignore[assignment]
+                encoding_headers, stream = encode_multipart_data(  # type: ignore[assignment]
+                    cast("dict[str, Any]", data), files=files or [], boundary=None
+                )
             else:
                 encoding_headers, stream = encode_urlencoded_data(decode_json(value=encode_json(data)))
             headers.update(encoding_headers)
-            body = b""
             for chunk in stream:
                 body += chunk
-            scope["_body"] = body  # type: ignore[typeddict-unknown-key]
-        else:
-            scope["_body"] = b""  # type: ignore[typeddict-unknown-key]
+        ScopeState.from_scope(scope).body = body
         self._create_cookie_header(headers, cookies)
         scope["headers"] = self._build_headers(headers)
         return Request(scope=scope)

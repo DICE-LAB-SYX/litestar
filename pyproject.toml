@@ -16,6 +16,7 @@ classifiers = [
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Programming Language :: Python",
   "Topic :: Internet :: WWW/HTTP",
   "Topic :: Software Development :: Libraries",
@@ -55,25 +56,28 @@ maintainers = [
 name = "litestar"
 readme = "README.md"
 requires-python = ">=3.8,<4.0"
-version = "2.1.1"
+version = "2.4.4"
 
 [project.urls]
 Blog = "https://blog.litestar.dev"
 Changelog = "https://github.com/litestar-org/litestar/releases/"
-Discord = "https://discord.gg/MmcwxztmQb"
+Discord = "https://discord.gg/litestar-919193495116337154"
+Documentation = "https://docs.litestar.dev/"
+Homepage = "https://litestar.dev/"
 "Issue Tracker" = "https://github.com/litestar-org/litestar/issues?q=is%3Aissue+is%3Aopen+sort%3Aupdated-desc"
 Reddit = "https://www.reddit.com/r/LitestarAPI"
+Repository = "https://github.com/litestar-org/litestar"
 Twitter = "https://twitter.com/LitestarAPI"
-documentation = "https://docs.litestar.dev/"
-homepage = "https://litestar.dev/"
-repository = "https://github.com/litestar-org/litestar"
 
 [project.optional-dependencies]
 annotated-types = ["annotated-types"]
 attrs = ["attrs"]
 brotli = ["brotli"]
-cli = ["jsbeautifier", "uvicorn[standard]"]
+cli = ["jsbeautifier", "uvicorn[standard]", "uvloop>=0.18.0; sys_platform != 'win32'"]
 cryptography = ["cryptography"]
+full = [
+  "litestar[annotated-types,attrs,brotli,cli,cryptography,jinja,jwt,mako,minijinja,opentelemetry,piccolo,picologging,prometheus,pydantic,redis,sqlalchemy,standard,structlog]",
+]
 jinja = ["jinja2>=3.1.2"]
 jwt = ["python-jose", "cryptography"]
 mako = ["mako>=1.2.4"]
@@ -82,11 +86,14 @@ opentelemetry = ["opentelemetry-instrumentation-asgi"]
 piccolo = ["piccolo"]
 picologging = ["picologging"]
 prometheus = ["prometheus-client"]
-pydantic = ["pydantic[email]", "pydantic-extra-types"]
+pydantic = ["pydantic", "email-validator", "pydantic-extra-types"]
 redis = ["redis[hiredis]>=4.4.4"]
-sqlalchemy = ["advanced-alchemy==0.2.2"]
-standard = ["jinja2", "jsbeautifier", "uvicorn[standard]", "fast-query-parsers>=1.0.2"]
+sqlalchemy = ["advanced-alchemy>=0.2.2,<1.0.0"]
+standard = ["jinja2", "jsbeautifier", "uvicorn[standard]", "uvloop>=0.18.0; sys_platform != 'win32'", "fast-query-parsers>=1.0.2"]
 structlog = ["structlog"]
+
+[tool.pdm]
+ignore_package_warnings = ["sphinx", "slotscheck"]
 
 [tool.pdm.dev-dependencies]
 dev = [
@@ -116,20 +123,20 @@ docs = [
 ]
 linting = [
   "ruff",
-  "black",
   "mypy",
   "pre-commit",
   "slotscheck",
-  "sourcery",
   "pyright",
   "blacken-docs",
   "asyncpg-stubs",
   "types-beautifulsoup4",
+  "types-pytest-lazy-fixture",
   "types-python-jose",
   "types-pyyaml",
   "types-redis",
 ]
 test = [
+  "covdefaults",
   "pytest",
   "pytest-asyncio",
   "pytest-cov",
@@ -166,30 +173,24 @@ docs-serve = "sphinx-autobuild docs docs/_build/ -j auto --watch litestar --watc
 lint = "pre-commit run --all-files"
 test = "pytest tests docs/examples"
 
-[tool.black]
-include = '\.pyi?$'
-line-length = 120
-
 [tool.codespell]
 ignore-words-list = "selectin"
 skip = 'pdm.lock,docs/examples/contrib/sqlalchemy/us_state_lookup.json'
 
 [tool.coverage.run]
 concurrency = ["multiprocessing", "thread"]
-omit = ["*/tests/*"]
+omit = ["*/tests/*", "*/litestar/plugins/sqlalchemy.py"]
 parallel = true
+plugins = ["covdefaults"]
+source = ["litestar"]
 
 [tool.coverage.report]
 exclude_lines = [
-  'pragma: no cover',
-  'if TYPE_CHECKING:',
-  'except ImportError as e:',
-  'except ImportError:',
-  '\.\.\.',
-  'raise NotImplementedError',
+  'except ImportError\b',
   'if VERSION.startswith("1"):',
   'if pydantic.VERSION.startswith("1"):',
 ]
+fail_under = 96
 
 [tool.pytest.ini_options]
 addopts = "--strict-markers --strict-config --dist=loadgroup"
@@ -216,7 +217,9 @@ markers = [
 xfail_strict = true
 
 [tool.mypy]
+packages = ["litestar", "tests"]
 plugins = ["pydantic.mypy"]
+python_version = "3.8"
 
 disallow_any_generics = false
 disallow_untyped_decorators = true
@@ -230,20 +233,25 @@ warn_unused_configs = true
 warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
-disable_error_code = "attr-defined"
-module = ["tests.*.test_sqlalchemy", "tests.*.test_sqlalchemy"]
-
-[[tool.mypy.overrides]]
-disable_error_code = ["arg-type", "misc", "valid-type", "var-annotated"]
-module = "tests.unit.test_contrib.test_sqlalchemy.test_dto"
+ignore_errors = true
+module = ["tests.examples.*", "tests.docker_service_fixtures"]
 
 [[tool.mypy.overrides]]
 disallow_untyped_decorators = false
-module = "tests.*"
+module = ["tests.unit.test_kwargs.test_reserved_kwargs_injection"]
+
+[[tool.mypy.overrides]]
+module = ["tests.unit.test_contrib.test_repository"]
+strict_equality = false
 
 [[tool.mypy.overrides]]
 ignore_missing_imports = true
-module = ["mako.*", "pytimeparse.*", "brotli.*", "jsbeautifier.*"]
+module = [
+  "brotli.*",
+  "fsspec.*",
+  "jsbeautifier.*",
+  "pytimeparse.*",
+]
 
 [tool.pydantic-mypy]
 init_forbid_extra = true
@@ -252,12 +260,20 @@ warn_required_dynamic_aliases = true
 warn_untyped_fields = true
 
 [tool.pyright]
+disableBytesTypePromotions = true
+reportUnnecessaryTypeIgnoreComments = true
 exclude = [
-  "examples/plugins/sqlalchemy_plugin",
-  "litestar/openapi",
-  "tests/unit/test_contrib/test_sqlalchemy/test_dto.py",
+  "test_apps",
+  "tools",
+  "docs",
+  "tests/examples",
+  "tests/docker_service_fixtures.py",
+  "litestar/contrib/pydantic/pydantic_dto_factory.py",
+  "litestar/contrib/pydantic/pydantic_init_plugin.py",
+  "tests/unit/test_contrib/test_sqlalchemy.py",
 ]
-include = ["litestar", "tests", "examples"]
+include = ["litestar", "tests"]
+pythonVersion = "3.8"
 
 [tool.slotscheck]
 strict-imports = false
@@ -317,6 +333,7 @@ ignore = [
   "E501", # pycodestyle line too long, handled by black
   "PLW2901", # pylint - for loop variable overwritten by assignment target
   "RUF012", # Ruff-specific rule - annotated with classvar
+  "ISC001", # Ruff formatter incompatible
 ]
 line-length = 120
 src = ["litestar", "tests", "docs/examples"]

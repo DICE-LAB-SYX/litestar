@@ -3,11 +3,15 @@ from __future__ import annotations
 import importlib.metadata
 import os
 import re
+import warnings
 from functools import partial
 from typing import Any
 
 from sphinx.addnodes import document
 from sphinx.application import Sphinx
+from sqlalchemy.exc import SAWarning
+
+warnings.filterwarnings("ignore", category=SAWarning)
 
 __all__ = ["setup", "update_html_context"]
 
@@ -38,7 +42,6 @@ extensions = [
 
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
-
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "msgspec": ("https://jcristharif.com/msgspec/", None),
@@ -53,8 +56,8 @@ intersphinx_mapping = {
     "piccolo": ("https://piccolo-orm.readthedocs.io/en/latest", None),
     "opentelemetry": ("https://opentelemetry-python.readthedocs.io/en/latest/", None),
     "advanced-alchemy": ("https://docs.advanced-alchemy.jolt.rs/latest/", None),
+    "jinja2": ("https://jinja.palletsprojects.com/en/latest/", None),
 }
-
 
 napoleon_google_docstring = True
 napoleon_include_special_with_doc = True
@@ -68,7 +71,6 @@ autodoc_class_signature = "separated"
 autodoc_default_options = {"special-members": "__init__", "show-inheritance": True, "members": True}
 autodoc_member_order = "bysource"
 autodoc_typehints_format = "short"
-
 
 nitpicky = True
 nitpick_ignore = [
@@ -84,6 +86,7 @@ nitpick_ignore = [
     (PY_CLASS, "_schema.Table"),
     (PY_CLASS, "_types.TypeDecorator"),
     (PY_CLASS, "abc.Collection"),
+    (PY_CLASS, "advanced_alchemy.utils.dataclass.Empty"),
     (PY_CLASS, "jinja2.environment.Environment"),
     (PY_CLASS, "pydantic.BaseModel"),
     (PY_CLASS, "pydantic.generics.GenericModel"),
@@ -109,6 +112,18 @@ nitpick_ignore = [
     (PY_CLASS, "SelectT"),
     (PY_CLASS, "T"),
     (PY_OBJ, "litestar.security.base.AuthType"),
+    # investigate
+    (PY_CLASS, "Environment"),
+    (PY_CLASS, "P"),
+    (PY_CLASS, "pydantic_v1.BaseModel"),
+    (PY_CLASS, "pydantic_v2.BaseModel"),
+    (PY_CLASS, "advanced_alchemy.config.types.Empty"),
+    (PY_OBJ, "litestar.template.base.TemplateType_co"),
+    (PY_OBJ, "litestar.template.base.ContextType_co"),
+    (PY_CLASS, "litestar.template.base.TemplateType_co"),
+    (PY_CLASS, "litestar.template.base.ContextType_co"),
+    (PY_CLASS, "litestar.template.base.R"),
+    (PY_ATTR, "litestar.openapi.controller.OpenAPIController.swagger_ui_init_oauth"),
     # intentionally undocumented
     (PY_CLASS, "BacklogStrategy"),
     (PY_CLASS, "ExceptionT"),
@@ -159,6 +174,9 @@ nitpick_ignore = [
     (PY_ATTR, "advanced_alchemy.repository.AbstractAsyncRepository.id_attribute"),
     (PY_OBJ, "litestar.template.base.T_co"),
     ("py:exc", "RepositoryError"),
+    ("py:exc", "InternalServerError"),
+    ("py:exc", "HTTPExceptions"),
+    (PY_CLASS, "litestar.template.Template"),
 ]
 
 nitpick_ignore_regex = [
@@ -186,6 +204,7 @@ nitpick_ignore_regex = [
     (PY_RE, r"advanced_alchemy.*\.T"),
     (PY_RE, r"advanced_alchemy\.config.common\.EngineT"),
     (PY_RE, r"advanced_alchemy\.config.common\.SessionT"),
+    (PY_RE, r".*R"),
 ]
 
 # Warnings about missing references to those targets in the specified location will be ignored.
@@ -198,6 +217,7 @@ ignore_missing_refs = {
     "litestar.template": {"litestar.template.base.T_co"},
     "litestar.openapi.OpenAPIController.security": {"SecurityRequirement"},
     "litestar.response.file.async_file_iterator": {"FileSystemAdapter"},
+    "advanced_alchemy._listeners.touch_updated_timestamp": {"Session"},
     re.compile("litestar.response.redirect.*"): {"RedirectStatusType"},
     re.compile(r"litestar\.plugins.*"): re.compile(".*ModelT"),
     re.compile(r"litestar\.(contrib|repository)\.*"): re.compile(".*T"),
@@ -205,6 +225,7 @@ ignore_missing_refs = {
         ".*(ConnectionT|EngineT|SessionT|SessionMakerT|SlotsBase)"
     ),
     re.compile(r"litestar\.dto.*"): re.compile(".*T|.*FieldDefinition|Empty"),
+    re.compile(r"litestar\.template\.(config|TemplateConfig).*"): re.compile(".*EngineType"),
 }
 
 # Do not warn about broken links to the following:
@@ -232,24 +253,31 @@ html_css_files = ["style.css"]
 html_show_sourcelink = False
 html_title = "Litestar Framework"
 
-
 html_theme_options = {
     "use_page_nav": False,
     "github_repo_name": "litestar",
     "logo": {
         "link": "https://litestar.dev",
     },
+    "pygment_light_style": "xcode",
+    "pygment_dark_style": "lightbulb",
+    "navigation_with_keys": True,
     "extra_navbar_items": {
         "Documentation": "index",
         "Community": {
             "Contributing": {
                 "description": "Learn how to contribute to the Litestar project",
-                "link": "https://docs.litestar.dev/2/contribution-guide.html",
+                "link": "https://docs.litestar.dev/latest/contribution-guide.html",
                 "icon": "contributing",
             },
             "Code of Conduct": {
                 "description": "Review the etiquette for interacting with the Litestar community",
-                "link": "https://github.com/litestar-org/.github/blob/main/CODE_OF_CONDUCT.md",
+                "link": "https://github.com/litestar-org/.github?tab=coc-ov-file",
+                "icon": "coc",
+            },
+            "Security": {
+                "description": "Overview of Litestar's security protocols",
+                "link": "https://github.com/litestar-org/.github?tab=coc-ov-file#security-ov-file",
                 "icon": "coc",
             },
         },
@@ -260,7 +288,7 @@ html_theme_options = {
                 "icon": "org",
             },
             "Releases": {
-                "description": "Details about the Litestar release process",
+                "description": "Explore the release process, versioning, and deprecation policy for Litestar",
                 "link": "https://litestar.dev/about/litestar-releases",
                 "icon": "releases",
             },
@@ -270,7 +298,23 @@ html_theme_options = {
             "2.x Changelog": "https://docs.litestar.dev/2/release-notes/changelog.html",
             "1.x Changelog": "https://docs.litestar.dev/1/release-notes/changelog.html",
         },
-        "Help": "https://github.com/orgs/litestar-org/discussions",
+        "Help": {
+            "Discord Help Forum": {
+                "description": "Dedicated Discord help forum",
+                "link": "https://discord.gg/litestar-919193495116337154",
+                "icon": "coc",
+            },
+            "GitHub Discussions": {
+                "description": "GitHub Discussions ",
+                "link": "https://github.com/orgs/litestar-org/discussions",
+                "icon": "coc",
+            },
+            "Stack Overflow": {
+                "description": "We monitor the <code><b>litestar</b></code> tag on Stack Overflow",
+                "link": "https://stackoverflow.com/questions/tagged/litestar",
+                "icon": "coc",
+            },
+        },
     },
 }
 
